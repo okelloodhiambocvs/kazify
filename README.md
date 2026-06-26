@@ -1,6 +1,6 @@
 # Kazify - Kenya's Premier On-Demand Trades Hub
 
-Live Deployment on https://kazify-lilac.vercel.app/ & https://kazify-api.onrender.com/
+Live Deployment on https://kazify-lilac.vercel.app/
 
 An escrow-backed, on-demand marketplace for trusted local trade professionals (Fundis) in Kenya. 
 

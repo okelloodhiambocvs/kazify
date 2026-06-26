@@ -110,7 +110,29 @@ const PORT = 3000;
 // Apply Helmet & CSP headers
 app.use(helmetMiddleware);
 
-app.use(cors());
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://kazify-lilac.vercel.app",
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests without an Origin header (e.g. health checks, curl)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 // Apply global rate limiting to all API endpoints

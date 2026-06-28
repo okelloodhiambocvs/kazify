@@ -1332,7 +1332,9 @@ app.post('/api/auth/refresh', (req, res) => {
 
     // Auto-heal the registry in case of server restart or container scale-to-zero
     if (!refreshTokensRegistry.has(refreshToken)) {
-      refreshTokensRegistry.add(refreshToken);
+      return res.status(401).json({
+        error: 'Refresh token has been revoked or is no longer valid.'
+      });
     }
 
     const userPayload = {

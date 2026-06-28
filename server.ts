@@ -2232,7 +2232,10 @@ app.post('/api/jobs/:id/accept-instant', authenticateToken, requireFundi, (req, 
 });
 
 // JOBS: Update workflow status (e.g. en_route, started, completed)
-app.post('/api/jobs/:id/status', (req, res) => {
+app.post(
+  '/api/jobs/:id/status',
+  authenticateToken,
+  (req, res) => {
   const jobId = req.params.id;
   const { status } = req.body;
 

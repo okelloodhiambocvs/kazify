@@ -56,19 +56,29 @@ export function validateEnvironment() {
 
   const missing = required.filter(key => !process.env[key]);
   if (missing.length > 0) {
-    logger.warn('Missing recommended security environment variables!', { missing });
-    // Assign secure fallback secrets dynamically if missing to prevent boot failures in sandbox
-    if (!process.env.JWT_SECRET) {
-      process.env.JWT_SECRET = crypto.randomBytes(32).toString('hex');
-      logger.info('Generated automatic secure random JWT_SECRET.');
-    }
-    if (!process.env.JWT_REFRESH_SECRET) {
-      process.env.JWT_REFRESH_SECRET = crypto.randomBytes(32).toString('hex');
-      logger.info('Generated automatic secure random JWT_REFRESH_SECRET.');
-    }
-  } else {
-    logger.info('All critical environment variables successfully validated.');
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}`
+    );
   }
+
+  logger.warn(
+    'Missing recommended security environment variables!',
+    { missing }
+  );
+
+  if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    logger.info('Generated development JWT_SECRET.');
+  }
+
+  if (!process.env.JWT_REFRESH_SECRET) {
+    process.env.JWT_REFRESH_SECRET = crypto.randomBytes(32).toString('hex');
+    logger.info('Generated development JWT_REFRESH_SECRET.');
+  }
+
+}
 }
 
 // ============================================================================

@@ -1608,8 +1608,16 @@ app.post('/api/users/:id/availability', authenticateToken, (req, res) => {
 });
 
 // REVIEWS: Post feedback
-app.post('/api/reviews', (req, res) => {
+app.post('/api/reviews', authenticateToken, (req, res) => {
   const { fundi_id, customer_id, customer_name, rating, comment, job_id } = req.body;
+
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (authUser.id !== customer_id) {
+    return res.status(403).json({
+      error: 'You may only submit reviews using your own account.'
+    });
+  }
 
   const newReview: LocalReview = {
     id: `rev_${Date.now()}`,
@@ -1626,7 +1634,9 @@ app.post('/api/reviews', (req, res) => {
 
   // Re-calculate rating
   const fundiReviews = reviews.filter(r => r.fundi_id === fundi_id);
-  const avgRating = fundiReviews.reduce((sum, r) => sum + r.rating, 0) / fundiReviews.length;
+  const avgRating =
+    fundiReviews.reduce((sum, r) => sum + r.rating, 0) /
+    fundiReviews.length;
 
   const fundiIdx = users.findIndex(u => u.id === fundi_id);
   if (fundiIdx !== -1) {

@@ -2236,74 +2236,163 @@ app.post(
   '/api/jobs/:id/status',
   authenticateToken,
   (req, res) => {
-  const jobId = req.params.id;
-  const { status } = req.body;
+    const currentUser = (req as AuthenticatedRequest).user;
+    const jobId = req.params.id;
+    const { status } = req.body;
 
-  const job = jobs.find(j => j.id === jobId);
-  if (!job) {
-    return res.status(404).json({ error: 'Job request reference not found' });
-  }
+    const job = jobs.find(j => j.id === jobId);
 
-  job.status = status;
-
-  if (status === 'completed') {
-    EscrowService.releaseFunds(jobId);
-
-    // Simulate updating completing statistics
-    const fundiIdx = users.findIndex(u => u.id === job.fundi_id);
-    if (fundiIdx !== -1) {
-      const u = users[fundiIdx];
-      u.status = 'available';
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job request reference not found'
+      });
     }
-  }
 
-  if (status === 'en_route') {
-    createNotification(job.customer_id, 'Fundi en route', `${job.fundi_name || 'Your tradesperson'} is traveling to your location.`);
-    
-    // Periodically simulate coordinates shifting for Uber-style live location map tracking!
-    let count = 0;
-    const intervalId = setInterval(() => {
-      const freshJob = jobs.find(j => j.id === jobId);
-      if (freshJob && freshJob.status === 'en_route') {
-        const custLat = freshJob.lat;
-        const custLng = freshJob.lng;
-        // Stepwise travel towards customer
-        const dx = (custLat - (freshJob.fundi_lat || -0.091702)) / (5 - count);
-        const dy = (custLng - (freshJob.fundi_lng || 34.767956)) / (5 - count);
-        freshJob.fundi_lat = (freshJob.fundi_lat || -0.091702) + dx;
-        freshJob.fundi_lng = (freshJob.fundi_lng || 34.767956) + dy;
+    // Only assigned fundi, owning customer or admin may update
+    const isAdmin = currentUser.role === 'admin';
+    const isCustomer = job.customer_id === currentUser.id;
+    const isAssignedFundi = job.fundi_id === currentUser.id;
 
-        const distance = getDistanceKM(custLat, custLng, freshJob.fundi_lat, freshJob.fundi_lng);
-        const eta = `${Math.ceil(distance * 3 + 1)} mins`;
+    if (!isAdmin && !isCustomer && !isAssignedFundi) {
+      return res.status(403).json({
+        error: 'You are not authorized to update this job.'
+      });
+    }
 
-        sendWSMessage(freshJob.customer_id, {
-          type: 'tracking_update',
-          job_id: jobId,
-          fundi_location: { lat: freshJob.fundi_lat, lng: freshJob.fundi_lng },
-          eta
-        });
+    // Allowed workflow states
+    const allowedStatuses = [
+      'pending',
+      'accepted',
+      'en_route',
+      'started',
+      'completed',
+      'cancelled'
+    ];
 
-        count++;
-        if (count >= 4) {
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        error: 'Invalid job status.'
+      });
+    }
+
+    // Prevent illegal workflow transitions
+    const validTransitions: Record<string, string[]> = {
+      pending: ['accepted', 'cancelled'],
+      accepted: ['en_route', 'cancelled'],
+      en_route: ['started', 'cancelled'],
+      started: ['completed'],
+      completed: [],
+      cancelled: []
+    };
+
+    const currentStatus = job.status;
+
+    if (
+      validTransitions[currentStatus] &&
+      !validTransitions[currentStatus].includes(status)
+    ) {
+      return res.status(400).json({
+        error: `Cannot change job from '${currentStatus}' to '${status}'.`
+      });
+    }
+
+    job.status = status;
+
+    if (status === 'completed') {
+      EscrowService.releaseFunds(jobId);
+
+      // Simulate updating completing statistics
+      const fundiIdx = users.findIndex(u => u.id === job.fundi_id);
+
+      if (fundiIdx !== -1) {
+        users[fundiIdx].status = 'available';
+      }
+    }
+
+    if (status === 'en_route') {
+      createNotification(
+        job.customer_id,
+        'Fundi en route',
+        `${job.fundi_name || 'Your tradesperson'} is traveling to your location.`
+      );
+
+      // Periodically simulate coordinates shifting for Uber-style live tracking
+      let count = 0;
+
+      const intervalId = setInterval(() => {
+        const freshJob = jobs.find(j => j.id === jobId);
+
+        if (freshJob && freshJob.status === 'en_route') {
+          const custLat = freshJob.lat;
+          const custLng = freshJob.lng;
+
+          const dx =
+            (custLat - (freshJob.fundi_lat || -0.091702)) /
+            (5 - count);
+
+          const dy =
+            (custLng - (freshJob.fundi_lng || 34.767956)) /
+            (5 - count);
+
+          freshJob.fundi_lat =
+            (freshJob.fundi_lat || -0.091702) + dx;
+
+          freshJob.fundi_lng =
+            (freshJob.fundi_lng || 34.767956) + dy;
+
+          const distance = getDistanceKM(
+            custLat,
+            custLng,
+            freshJob.fundi_lat,
+            freshJob.fundi_lng
+          );
+
+          const eta = `${Math.ceil(distance * 3 + 1)} mins`;
+
+          sendWSMessage(freshJob.customer_id, {
+            type: 'tracking_update',
+            job_id: jobId,
+            fundi_location: {
+              lat: freshJob.fundi_lat,
+              lng: freshJob.fundi_lng
+            },
+            eta
+          });
+
+          count++;
+
+          if (count >= 4) {
+            clearInterval(intervalId);
+          }
+        } else {
           clearInterval(intervalId);
         }
-      } else {
-        clearInterval(intervalId);
-      }
-    }, 5000);
-  }
+      }, 5000);
+    }
 
-  if (status === 'started') {
-    createNotification(job.customer_id, 'Work Commenced', `Secure escrow holds are now active. Work has started.`);
-  }
+    if (status === 'started') {
+      createNotification(
+        job.customer_id,
+        'Work Commenced',
+        'Secure escrow holds are now active. Work has started.'
+      );
+    }
 
-  sendWSMessage(job.customer_id, { type: 'job_status_change', job });
-  if (job.fundi_id) {
-    sendWSMessage(job.fundi_id, { type: 'job_status_change', job });
-  }
+    sendWSMessage(job.customer_id, {
+      type: 'job_status_change',
+      job
+    });
 
-  res.json(job);
-});
+    if (job.fundi_id) {
+      sendWSMessage(job.fundi_id, {
+        type: 'job_status_change',
+        job
+      });
+    }
+
+    res.json(job);
+  }
+);
 
 // PAYMENTS: M-Pesa STK Push Integration using Daraja Client
 app.post('/api/mpesa/stkpush', async (req, res) => {

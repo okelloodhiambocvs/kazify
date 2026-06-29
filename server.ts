@@ -2953,19 +2953,21 @@ Please generate a professional cost estimation report including estimated amount
   }
 });
 
-
 // --- WALLET ENDPOINTS ---
 
 // Get wallet details and history
 app.get('/api/wallets/:user_id', authenticateToken, (req, res) => {
   const userId = req.params.user_id;
   const authUser = (req as AuthenticatedRequest).user;
-  
+
   if (userId !== authUser?.id && authUser?.role !== 'admin') {
-    return res.status(403).json({ error: 'Unauthorized: Cannot view another user\'s wallet' });
+    return res.status(403).json({
+      error: 'Unauthorized: Cannot view another user\'s wallet'
+    });
   }
 
   let wallet = wallets.find(w => w.user_id === userId);
+
   if (!wallet) {
     wallet = {
       id: `w_${userId}`,
@@ -2974,10 +2976,16 @@ app.get('/api/wallets/:user_id', authenticateToken, (req, res) => {
       currency: "KES",
       updated_at: new Date().toISOString()
     };
+
     wallets.push(wallet);
   }
+
   const txs = walletTransactions.filter(t => t.user_id === userId);
-  res.json({ wallet, transactions: txs });
+
+  res.json({
+    wallet,
+    transactions: txs
+  });
 });
 
 // Deposit money into wallet
@@ -2987,20 +2995,40 @@ app.post('/api/wallets/deposit', authenticateToken, (req, res) => {
   const ip = req.ip || '127.0.0.1';
 
   if (user_id !== authUser?.id) {
-    return res.status(403).json({ error: 'Unauthorized: Cannot deposit into another user\'s wallet' });
+    return res.status(403).json({
+      error: 'Unauthorized: Cannot deposit into another user\'s wallet'
+    });
   }
 
   const userObj = users.find(u => u.id === user_id);
+
   if (userObj && userObj.status === 'suspended') {
-    return res.status(403).json({ error: 'Account suspended: Your account is on an administrative hold. Transactions are blocked.' });
+    return res.status(403).json({
+      error: 'Account suspended: Your account is on an administrative hold. Transactions are blocked.'
+    });
   }
 
   const numAmt = parseFloat(amount);
+
   if (isNaN(numAmt) || numAmt <= 0) {
-    return res.status(400).json({ error: 'Invalid deposit amount' });
+    return res.status(400).json({
+      error: 'Invalid deposit amount'
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // NEW: Validate phone number
+  // ------------------------------------------------------------------
+  const phone = String(phone_number || '').trim();
+
+  if (!/^(254|\+254|0)\d{9}$/.test(phone)) {
+    return res.status(400).json({
+      error: 'Invalid phone number.'
+    });
   }
 
   let wallet = wallets.find(w => w.user_id === user_id);
+
   if (!wallet) {
     wallet = {
       id: `w_${user_id}`,
@@ -3009,6 +3037,7 @@ app.post('/api/wallets/deposit', authenticateToken, (req, res) => {
       currency: "KES",
       updated_at: new Date().toISOString()
     };
+
     wallets.push(wallet);
   }
 
@@ -3024,13 +3053,26 @@ app.post('/api/wallets/deposit', authenticateToken, (req, res) => {
     description: `M-Pesa STK Push deposit via ${phone_number || 'STK Push'}`,
     created_at: new Date().toISOString()
   };
+
   walletTransactions.unshift(tx);
 
   // Evaluate Sentinel Rules for Transaction Velocity
-  evaluateFraudAndVelocityRules(user_id, 'transaction', { ip, amount: numAmt });
+  evaluateFraudAndVelocityRules(user_id, 'transaction', {
+    ip,
+    amount: numAmt
+  });
 
-  createNotification(user_id, "Wallet Deposited", `Successfully deposited KES ${numAmt} into your Kazify Wallet.`);
-  res.json({ success: true, wallet, transaction: tx });
+  createNotification(
+    user_id,
+    "Wallet Deposited",
+    `Successfully deposited KES ${numAmt} into your Kazify Wallet.`
+  );
+
+  res.json({
+    success: true,
+    wallet,
+    transaction: tx
+  });
 });
 
 // Withdraw money from wallet to mobile money provider

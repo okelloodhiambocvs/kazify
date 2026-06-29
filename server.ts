@@ -4048,44 +4048,140 @@ app.post(
 );
 
 // Get dispute chat messages
-app.get('/api/disputes/:id/messages', (req, res) => {
-  const disputeId = req.params.id;
-  const filtered = disputeMessages.filter(m => m.dispute_id === disputeId);
-  res.json(filtered);
-});
+app.get(
+  '/api/disputes/:id/messages',
+  authenticateToken,
+  (req, res) => {
+    const disputeId = req.params.id;
+    const user = (req as AuthenticatedRequest).user;
+
+    const dispute = disputes.find(d => d.id === disputeId);
+
+    if (!dispute) {
+      return res.status(404).json({
+        error: 'Dispute not found'
+      });
+    }
+
+    const job = jobs.find(j => j.id === dispute.job_id);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Associated job not found'
+      });
+    }
+
+    const isParticipant =
+      user.id === job.customer_id ||
+      user.id === job.fundi_id;
+
+    if (!isParticipant && user.role !== 'admin') {
+      return res.status(403).json({
+        error: 'You are not authorized to view these dispute messages.'
+      });
+    }
+
+    const filtered = disputeMessages.filter(
+      m => m.dispute_id === disputeId
+    );
+
+    res.json(filtered);
+  }
+);
 
 // Resolve dispute (Admin Arbitration)
-app.post('/api/disputes/:id/resolve', (req, res) => {
-  const disputeId = req.params.id;
-  const { resolution, resolution_summary } = req.body;
+app.post(
+  '/api/disputes/:id/resolve',
+  authenticateToken,
+  requireAdmin,
+  (req, res) => {
+    const admin = (req as AuthenticatedRequest).user;
 
-  const dispute = disputes.find(d => d.id === disputeId);
-  if (!dispute) {
-    return res.status(404).json({ error: 'Dispute not found' });
+    const disputeId = req.params.id;
+    const { resolution, resolution_summary } = req.body;
+
+    const allowedResolutions = [
+      'resolved_refunded',
+      'resolved_released'
+    ];
+
+    if (!allowedResolutions.includes(resolution)) {
+      return res.status(400).json({
+        error: 'Invalid dispute resolution.'
+      });
+    }
+
+    if (
+      typeof resolution_summary !== 'string' ||
+      resolution_summary.trim().length < 10
+    ) {
+      return res.status(400).json({
+        error: 'Resolution summary must be at least 10 characters.'
+      });
+    }
+
+    const dispute = disputes.find(d => d.id === disputeId);
+
+    if (!dispute) {
+      return res.status(404).json({
+        error: 'Dispute not found'
+      });
+    }
+
+    dispute.status = resolution;
+    dispute.resolution_summary = resolution_summary.trim();
+    dispute.resolved_at = new Date().toISOString();
+
+    const job = jobs.find(j => j.id === dispute.job_id);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job associated with dispute not found'
+      });
+    }
+
+    const escAcc = escrowAccounts.find(
+      ea => ea.job_id === job.id
+    );
+
+    if (resolution === 'resolved_refunded') {
+      job.status = 'cancelled';
+
+      if (escAcc) {
+        escAcc.status = 'refunded';
+        escAcc.updated_at = new Date().toISOString();
+      }
+
+      EscrowService.refundFunds(job.id);
+    } else if (resolution === 'resolved_released') {
+      job.status = 'completed';
+
+      if (escAcc) {
+        escAcc.status = 'released';
+        escAcc.updated_at = new Date().toISOString();
+      }
+
+      EscrowService.releaseFunds(job.id);
+    }
+
+    recordAdminAudit(
+      admin.id,
+      admin.name,
+      'RESOLVE_DISPUTE',
+      'dispute',
+      dispute.id,
+      `Resolved dispute ${dispute.id} for job ${job.id} using '${resolution}'. Summary: ${resolution_summary}`,
+      req.ip,
+      req.headers['user-agent']
+    );
+
+    res.json({
+      success: true,
+      dispute,
+      job
+    });
   }
-
-  dispute.status = resolution;
-  dispute.resolution_summary = resolution_summary;
-  dispute.resolved_at = new Date().toISOString();
-
-  const job = jobs.find(j => j.id === dispute.job_id);
-  if (!job) {
-    return res.status(404).json({ error: 'Job associated with dispute not found' });
-  }
-
-  const escAcc = escrowAccounts.find(ea => ea.job_id === job.id);
-
-  if (resolution === 'resolved_refunded') {
-    job.status = 'cancelled';
-    EscrowService.refundFunds(job.id);
-  } else if (resolution === 'resolved_released') {
-    job.status = 'completed';
-    EscrowService.releaseFunds(job.id);
-  }
-
-  res.json({ success: true, dispute, job });
-});
-
+);
 
 // --- PRODUCTION NOTIFICATION ENGINE ENDPOINTS ---
 

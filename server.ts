@@ -3200,78 +3200,130 @@ app.get('/api/wallets/:user_id/audit', authenticateToken, (req, res) => {
 });
 
 // Pay escrow using wallet balance
-app.post('/api/wallets/pay-escrow', (req, res) => {
-  const { user_id, job_id } = req.body;
-  const job = jobs.find(j => j.id === job_id);
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
+app.post(
+  '/api/wallets/pay-escrow',
+  authenticateToken,
+  requireCustomer,
+  (req, res) => {
 
-  let wallet = wallets.find(w => w.user_id === user_id);
-  if (!wallet || wallet.balance < job.amount) {
-    return res.status(400).json({ error: 'Insufficient wallet balance. Please top up.' });
-  }
+    const { user_id, job_id } = req.body;
 
-  wallet.balance -= job.amount;
-  wallet.updated_at = new Date().toISOString();
+    const authUser = (req as AuthenticatedRequest).user;
 
-  // Record wallet transaction
-  const tx: LocalWalletTransaction = {
-    id: `wtx_${Date.now()}`,
-    wallet_id: wallet.id,
-    user_id,
-    amount: -job.amount,
-    type: 'escrow_hold',
-    description: `Wallet Escrow hold for "${job.title}"`,
-    reference_id: job_id,
-    created_at: new Date().toISOString()
-  };
-  walletTransactions.unshift(tx);
+    // Prevent customers from paying escrow using another user's wallet
+    if (user_id !== authUser?.id) {
+      return res.status(403).json({
+        error: 'Unauthorized: You may only use your own wallet.'
+      });
+    }
 
-  // Update job and escrow account status
-  job.escrow_status = 'held';
+    const job = jobs.find(j => j.id === job_id);
 
-  const escAcc = escrowAccounts.find(ea => ea.job_id === job_id);
-  if (escAcc) {
-    escAcc.status = 'held';
-    escAcc.updated_at = new Date().toISOString();
-  } else {
-    const commRate = 0.10;
-    const commission = Math.round(job.amount * commRate);
-    const payout = job.amount - commission;
-    escrowAccounts.push({
-      id: `escrow_${job_id}`,
-      job_id,
-      customer_id: job.customer_id,
-      fundi_id: job.fundi_id,
-      amount: job.amount,
-      commission_fee: commission,
-      payout_amount: payout,
-      status: 'held',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found'
+      });
+    }
+
+    // Prevent customers from paying escrow for someone else's job
+    if (job.customer_id !== authUser.id) {
+      return res.status(403).json({
+        error: 'Unauthorized: You may only fund escrow for your own jobs.'
+      });
+    }
+
+    let wallet = wallets.find(w => w.user_id === user_id);
+
+    if (!wallet || wallet.balance < job.amount) {
+      return res.status(400).json({
+        error: 'Insufficient wallet balance. Please top up.'
+      });
+    }
+
+    wallet.balance -= job.amount;
+    wallet.updated_at = new Date().toISOString();
+
+    // Record wallet transaction
+    const tx: LocalWalletTransaction = {
+      id: `wtx_${Date.now()}`,
+      wallet_id: wallet.id,
+      user_id,
+      amount: -job.amount,
+      type: 'escrow_hold',
+      description: `Wallet Escrow hold for "${job.title}"`,
+      reference_id: job_id,
+      created_at: new Date().toISOString()
+    };
+
+    walletTransactions.unshift(tx);
+
+    // Update job and escrow account status
+    job.escrow_status = 'held';
+
+    const escAcc = escrowAccounts.find(ea => ea.job_id === job_id);
+
+    if (escAcc) {
+      escAcc.status = 'held';
+      escAcc.updated_at = new Date().toISOString();
+    } else {
+      const commRate = 0.10;
+      const commission = Math.round(job.amount * commRate);
+      const payout = job.amount - commission;
+
+      escrowAccounts.push({
+        id: `escrow_${job_id}`,
+        job_id,
+        customer_id: job.customer_id,
+        fundi_id: job.fundi_id,
+        amount: job.amount,
+        commission_fee: commission,
+        payout_amount: payout,
+        status: 'held',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+
+    // Set contract status to active
+    const contract = contracts.find(c => c.job_id === job_id);
+
+    if (contract) {
+      contract.status = 'active';
+    }
+
+    createNotification(
+      user_id,
+      'Escrow Secured via Wallet',
+      `KES ${job.amount} successfully deducted and held in escrow for "${job.title}".`
+    );
+
+    if (job.fundi_id) {
+      createNotification(
+        job.fundi_id,
+        'Escrow Secured',
+        `The client has secured KES ${job.amount} in escrow. You can now begin working.`
+      );
+    }
+
+    sendWSMessage(job.customer_id, {
+      type: 'escrow_received',
+      job
+    });
+
+    if (job.fundi_id) {
+      sendWSMessage(job.fundi_id, {
+        type: 'escrow_received',
+        job
+      });
+    }
+
+    res.json({
+      success: true,
+      wallet,
+      job
     });
   }
-
-  // Set contract status to active
-  const contract = contracts.find(c => c.job_id === job_id);
-  if (contract) {
-    contract.status = 'active';
-  }
-
-  createNotification(user_id, "Escrow Secured via Wallet", `KES ${job.amount} successfully deducted and held in escrow for "${job.title}".`);
-  if (job.fundi_id) {
-    createNotification(job.fundi_id, "Escrow Secured", `The client has secured KES ${job.amount} in escrow. You can now begin working.`);
-  }
-
-  sendWSMessage(job.customer_id, { type: 'escrow_received', job });
-  if (job.fundi_id) {
-    sendWSMessage(job.fundi_id, { type: 'escrow_received', job });
-  }
-
-  res.json({ success: true, wallet, job });
-});
-
+);
 
 // --- KYC DOCUMENT ENDPOINTS ---
 

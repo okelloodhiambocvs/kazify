@@ -1662,13 +1662,30 @@ app.post('/api/reviews', authenticateToken, (req, res) => {
     });
   }
 
+  // ------------------------------------------------------------------
+  // NEW: Validate review rating
+  // ------------------------------------------------------------------
+  const numericRating = Number(rating);
+
+  if (!Number.isFinite(numericRating)) {
+    return res.status(400).json({
+      error: 'Rating must be a valid number.'
+    });
+  }
+
+  if (numericRating < 1 || numericRating > 5) {
+    return res.status(400).json({
+      error: 'Rating must be between 1 and 5.'
+    });
+  }
+
   const newReview: LocalReview = {
     id: `rev_${Date.now()}`,
     job_id,
     fundi_id,
     customer_id,
     customer_name,
-    rating: parseFloat(rating) || 5,
+    rating: numericRating,
     comment,
     created_at: new Date().toISOString()
   };
@@ -1677,11 +1694,13 @@ app.post('/api/reviews', authenticateToken, (req, res) => {
 
   // Re-calculate rating
   const fundiReviews = reviews.filter(r => r.fundi_id === fundi_id);
+
   const avgRating =
     fundiReviews.reduce((sum, r) => sum + r.rating, 0) /
     fundiReviews.length;
 
   const fundiIdx = users.findIndex(u => u.id === fundi_id);
+
   if (fundiIdx !== -1) {
     users[fundiIdx].rating = parseFloat(avgRating.toFixed(1));
   }
@@ -1689,6 +1708,7 @@ app.post('/api/reviews', authenticateToken, (req, res) => {
   // Set rated state on job if provided
   if (job_id) {
     const jobIdx = jobs.findIndex(j => j.id === job_id);
+
     if (jobIdx !== -1) {
       jobs[jobIdx].is_rated = true;
     }

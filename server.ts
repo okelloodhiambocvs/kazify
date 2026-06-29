@@ -4687,45 +4687,132 @@ app.get('/api/escrow/:jobId/milestones', (req, res) => {
 });
 
 // 5. Release a Milestone
-app.post('/api/escrow/milestones/:milestoneId/release', authenticateToken, (req, res) => {
-  const milestoneId = req.params.milestoneId;
+app.post(
+  '/api/escrow/milestones/:milestoneId/release',
+  authenticateToken,
+  (req, res) => {
+    const authUser = (req as AuthenticatedRequest).user;
+    const milestoneId = req.params.milestoneId;
 
-  const milestone = escrowMilestones.find(m => m.id === milestoneId);
-  if (!milestone) {
-    return res.status(404).json({ error: 'Milestone not found.' });
-  }
-
-  try {
-    const settlement = EscrowEngine.releaseMilestone(milestoneId, `Milestone completion release`);
-    
-    // Track matching in-memory wallet of Admin for commission syncing
-    let adminWallet = wallets.find(w => w.user_id === 'admin-user-id-001' || w.user_id === 'admin');
-    if (adminWallet) {
-      adminWallet.balance += settlement.platform_fee;
-      adminWallet.updated_at = new Date().toISOString();
+    if (!authUser) {
+      return res.status(401).json({
+        error: 'Authentication required.'
+      });
     }
 
-    const escAcc = escrowAccounts.find(ea => ea.id === milestone.escrow_account_id);
-    if (escAcc) {
-      const job = jobs.find(j => j.id === escAcc.job_id);
+    const milestone = escrowMilestones.find(
+      m => m.id === milestoneId
+    );
+
+    if (!milestone) {
+      return res.status(404).json({
+        error: 'Milestone not found.'
+      });
+    }
+
+    const escAcc = escrowAccounts.find(
+      ea => ea.id === milestone.escrow_account_id
+    );
+
+    if (!escAcc) {
+      return res.status(404).json({
+        error: 'Escrow account not found.'
+      });
+    }
+
+    // Only the customer who owns the escrow or an administrator
+    // may release milestone funds.
+    const authorized =
+      authUser.role === 'admin' ||
+      authUser.id === escAcc.customer_id;
+
+    if (!authorized) {
+      return res.status(403).json({
+        error: 'You are not authorized to release this milestone.'
+      });
+    }
+
+    try {
+      const settlement = EscrowEngine.releaseMilestone(
+        milestoneId,
+        'Milestone completion release'
+      );
+
+      // Sync platform commission wallet
+      const adminWallet = wallets.find(
+        w =>
+          w.user_id === 'admin-user-id-001' ||
+          w.user_id === 'admin'
+      );
+
+      if (adminWallet) {
+        adminWallet.balance += settlement.platform_fee;
+        adminWallet.updated_at = new Date().toISOString();
+      }
+
+      const job = jobs.find(
+        j => j.id === escAcc.job_id
+      );
+
       if (job) {
         if (escAcc.status === 'released') {
           job.escrow_status = 'released';
           job.status = 'completed';
         }
-        createNotification(escAcc.customer_id, "Milestone Released", `Milestone "${milestone.title}" has been released to the tradesperson.`);
-        createNotification(escAcc.fundi_id!, "Milestone Payment Dispatched! 💰", `KES ${settlement.amount_net} has been dispatched for milestone "${milestone.title}".`);
 
-        sendWSMessage(escAcc.customer_id, { type: 'milestone_released', job, milestone });
-        sendWSMessage(escAcc.fundi_id!, { type: 'milestone_released', job, milestone });
+        createNotification(
+          escAcc.customer_id,
+          'Milestone Released',
+          `Milestone "${milestone.title}" has been released to the tradesperson.`
+        );
+
+        if (escAcc.fundi_id) {
+          createNotification(
+            escAcc.fundi_id,
+            'Milestone Payment Dispatched! 💰',
+            `KES ${settlement.amount_net} has been dispatched for milestone "${milestone.title}".`
+          );
+
+          sendWSMessage(escAcc.fundi_id, {
+            type: 'milestone_released',
+            job,
+            milestone
+          });
+        }
+
+        sendWSMessage(escAcc.customer_id, {
+          type: 'milestone_released',
+          job,
+          milestone
+        });
       }
-    }
 
-    res.json({ success: true, settlement, milestone });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+      // Immutable audit log
+      recordSensitiveStateChange(
+        authUser.id,
+        authUser.name,
+        'PAYMENT_STATE_CHANGE',
+        'payment',
+        milestone.id,
+        'locked',
+        'released',
+        `Released milestone "${milestone.title}" for escrow account ${escAcc.id}.`,
+        req.ip,
+        req.headers['user-agent'] as string
+      );
+
+      return res.json({
+        success: true,
+        settlement,
+        milestone
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        error: err.message
+      });
+    }
   }
-});
+);
 
 // 6. Partial Escrow Release
 app.post('/api/escrow/accounts/:escrowAccountId/release-partial', authenticateToken, (req, res) => {

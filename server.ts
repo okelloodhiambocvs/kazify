@@ -4399,20 +4399,51 @@ app.post('/api/admin/users/:id/status', authenticateToken, requireAdmin, (req, r
 app.post('/api/admin/users/:id/role', authenticateToken, requireAdmin, (req, res) => {
   const admin = (req as AuthenticatedRequest).user;
   const targetId = req.params.id;
-  const { role } = req.body; // 'customer', 'fundi', 'admin'
+
+  const role = String(req.body.role).trim().toLowerCase();
+
+  const allowedRoles = ['customer', 'fundi', 'admin'] as const;
+
+  if (!allowedRoles.includes(role as typeof allowedRoles[number])) {
+    return res.status(400).json({
+      error: 'Invalid role. Allowed roles are customer, fundi, and admin.'
+    });
+  }
 
   const targetUser = users.find(u => u.id === targetId);
+
   if (!targetUser) {
-    return res.status(404).json({ error: 'User not found' });
+    return res.status(404).json({
+      error: 'User not found'
+    });
+  }
+
+  // Prevent unnecessary updates
+  if (targetUser.role === role) {
+    return res.status(409).json({
+      error: `User already has the '${role}' role.`
+    });
+  }
+
+  // Prevent an admin from removing their own admin privileges
+  if (
+    admin.id === targetId &&
+    targetUser.role === 'admin' &&
+    role !== 'admin'
+  ) {
+    return res.status(400).json({
+      error: 'You cannot remove your own administrator privileges.'
+    });
   }
 
   const oldRole = targetUser.role;
-  targetUser.role = role;
+
+  targetUser.role = role as 'customer' | 'fundi' | 'admin';
 
   recordAdminAudit(
     admin.id,
     admin.name,
-    `UPDATE_USER_ROLE`,
+    'UPDATE_USER_ROLE',
     'user',
     targetId,
     `Updated role of user ${targetUser.name} (${targetUser.email}) from '${oldRole}' to '${role}'.`,
@@ -4426,7 +4457,14 @@ app.post('/api/admin/users/:id/role', authenticateToken, requireAdmin, (req, res
     `An administrator has updated your account role to ${role}.`
   );
 
-  res.json({ success: true, user: { id: targetUser.id, name: targetUser.name, role: targetUser.role } });
+  res.json({
+    success: true,
+    user: {
+      id: targetUser.id,
+      name: targetUser.name,
+      role: targetUser.role
+    }
+  });
 });
 
 // 3. Admin Wallet Override (Increase/decrease wallet balance with double-entry matching)

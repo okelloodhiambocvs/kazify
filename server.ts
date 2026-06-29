@@ -4348,16 +4348,30 @@ app.post('/api/admin/users/:id/status', authenticateToken, requireAdmin, (req, r
 
   const targetUser = users.find(u => u.id === targetId);
   if (!targetUser) {
-    return res.status(404).json({ error: 'User not found' });
+    return res.status(404).json({
+      error: 'User not found'
+    });
+  }
+
+  // Validate allowed account statuses
+  const allowedStatuses = ['active', 'suspended', 'banned'];
+
+  if (
+    typeof status !== 'string' ||
+    !allowedStatuses.includes(status)
+  ) {
+    return res.status(400).json({
+      error: `Invalid account status. Allowed values: ${allowedStatuses.join(', ')}`
+    });
   }
 
   const oldStatus = targetUser.status || 'active';
   targetUser.status = status;
-  
+
   recordAdminAudit(
     admin.id,
     admin.name,
-    `UPDATE_USER_STATUS`,
+    'UPDATE_USER_STATUS',
     'user',
     targetId,
     `Updated status of user ${targetUser.name} (${targetUser.email}) from '${oldStatus}' to '${status}'. Reason: ${reason || 'Not specified'}.`,
@@ -4368,10 +4382,17 @@ app.post('/api/admin/users/:id/status', authenticateToken, requireAdmin, (req, r
   createNotification(
     targetId,
     `Account Status Update: ${status.toUpperCase()}`,
-    `An administrator has updated your account status to ${status}. ${reason ? 'Reason: ' + reason : ''}`
+    `An administrator has updated your account status to ${status}.${reason ? ' Reason: ' + reason : ''}`
   );
 
-  res.json({ success: true, user: { id: targetUser.id, name: targetUser.name, status: targetUser.status } });
+  res.json({
+    success: true,
+    user: {
+      id: targetUser.id,
+      name: targetUser.name,
+      status: targetUser.status
+    }
+  });
 });
 
 // 2b. Change User Role (Role Changes)

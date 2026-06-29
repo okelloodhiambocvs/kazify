@@ -3934,7 +3934,8 @@ app.post(
     // Only draft contracts may be negotiated
     if (contract.status !== 'draft') {
       return res.status(400).json({
-        error: 'Contract is already locked or active and cannot be negotiated'
+        error:
+          'Contract is already locked or active and cannot be negotiated'
       });
     }
 
@@ -3949,7 +3950,7 @@ app.post(
       });
     }
 
-    let changes: string[] = [];
+    const changes: string[] = [];
 
     // Update contract terms
     if (typeof terms === 'string' && terms.trim() !== '') {
@@ -4002,12 +4003,14 @@ app.post(
     recordSensitiveStateChange(
       authUser.id,
       authUser.name,
-      'CONTRACT_NEGOTIATION',
+      'CONTRACT_APPROVAL',
       'contract',
       contract.id,
       'draft',
       'draft',
-      `Contract updated (${changes.join(', ')}). Signatures reset pending re-approval.`,
+      `Contract updated (${changes.join(
+        ', '
+      )}). Signatures reset pending re-approval.`,
       req.ip,
       req.headers['user-agent'] as string
     );

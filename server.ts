@@ -4521,20 +4521,64 @@ app.get('/api/admin/notifications/queue', authenticateToken, requireAdmin, (req,
   res.json(status);
 });
 
-
 // --- TRUE MARKETPLACE ESCROW API ENDPOINTS ---
 
 // 1. Get all Escrow Accounts
-app.get('/api/escrow/accounts', (req, res) => {
-  res.json(escrowAccounts);
+app.get('/api/escrow/accounts', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  // Administrators may view every escrow account
+  if (authUser.role === 'admin') {
+    return res.json(escrowAccounts);
+  }
+
+  // Other users may only view escrow accounts they participate in
+  const visibleAccounts = escrowAccounts.filter(
+    e =>
+      e.customer_id === authUser.id ||
+      e.fundi_id === authUser.id
+  );
+
+  res.json(visibleAccounts);
 });
 
 // 2. Get Escrow Account by Job ID
-app.get('/api/escrow/accounts/job/:jobId', (req, res) => {
-  const escrow = escrowAccounts.find(e => e.job_id === req.params.jobId);
-  if (!escrow) {
-    return res.status(404).json({ error: 'Escrow account not found for this job.' });
+app.get('/api/escrow/accounts/job/:jobId', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
   }
+
+  const escrow = escrowAccounts.find(
+    e => e.job_id === req.params.jobId
+  );
+
+  if (!escrow) {
+    return res.status(404).json({
+      error: 'Escrow account not found for this job.'
+    });
+  }
+
+  const authorized =
+    authUser.role === 'admin' ||
+    escrow.customer_id === authUser.id ||
+    escrow.fundi_id === authUser.id;
+
+  if (!authorized) {
+    return res.status(403).json({
+      error: 'You are not authorized to view this escrow account.'
+    });
+  }
+
   res.json(escrow);
 });
 

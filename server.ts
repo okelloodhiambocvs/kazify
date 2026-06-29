@@ -3082,22 +3082,58 @@ app.post('/api/wallets/withdraw', authenticateToken, (req, res) => {
   const ip = req.ip || '127.0.0.1';
 
   if (user_id !== authUser?.id) {
-    return res.status(403).json({ error: 'Unauthorized: Cannot withdraw from another user\'s wallet' });
+    return res.status(403).json({
+      error: 'Unauthorized: Cannot withdraw from another user\'s wallet'
+    });
   }
 
   const userObj = users.find(u => u.id === user_id);
   if (userObj && userObj.status === 'suspended') {
-    return res.status(403).json({ error: 'Account suspended: Your account is on an administrative hold. Transactions are blocked.' });
+    return res.status(403).json({
+      error: 'Account suspended: Your account is on an administrative hold. Transactions are blocked.'
+    });
   }
 
   const numAmt = parseFloat(amount);
   if (isNaN(numAmt) || numAmt <= 0) {
-    return res.status(400).json({ error: 'Invalid withdrawal amount' });
+    return res.status(400).json({
+      error: 'Invalid withdrawal amount'
+    });
+  }
+
+  // Validate destination phone number
+  const normalizedPhone = String(phone_number || '').trim();
+
+  const phoneRegex =
+    /^(?:\+254|254|0)?(7\d{8}|1\d{8})$/;
+
+  if (!phoneRegex.test(normalizedPhone)) {
+    return res.status(400).json({
+      error: 'Invalid destination mobile number.'
+    });
+  }
+
+  // Restrict supported payout providers
+  const allowedProviders = [
+    'M-Pesa',
+    'Airtel Money'
+  ];
+
+  const payoutProvider =
+    provider || 'M-Pesa';
+
+  if (!allowedProviders.includes(payoutProvider)) {
+    return res.status(400).json({
+      error: 'Unsupported mobile money provider.'
+    });
   }
 
   let wallet = wallets.find(w => w.user_id === user_id);
+
   if (!wallet || wallet.balance < numAmt) {
-    return res.status(400).json({ error: 'Insufficient wallet balance for withdrawal' });
+    return res.status(400).json({
+      error: 'Insufficient wallet balance for withdrawal'
+    });
   }
 
   wallet.balance -= numAmt;
@@ -3109,16 +3145,29 @@ app.post('/api/wallets/withdraw', authenticateToken, (req, res) => {
     user_id,
     amount: -numAmt,
     type: 'withdrawal',
-    description: `Mobile Money withdrawal via ${provider || 'M-Pesa'} to ${phone_number}`,
+    description: `Mobile Money withdrawal via ${payoutProvider} to ${normalizedPhone}`,
     created_at: new Date().toISOString()
   };
+
   walletTransactions.unshift(tx);
 
   // Evaluate Sentinel Rules for Transaction Velocity
-  evaluateFraudAndVelocityRules(user_id, 'transaction', { ip, amount: numAmt });
+  evaluateFraudAndVelocityRules(user_id, 'transaction', {
+    ip,
+    amount: numAmt
+  });
 
-  createNotification(user_id, "Wallet Withdrawal", `Successfully withdrew KES ${numAmt} from your Kazify Wallet to ${phone_number}.`);
-  res.json({ success: true, wallet, transaction: tx });
+  createNotification(
+    user_id,
+    'Wallet Withdrawal',
+    `Successfully withdrew KES ${numAmt} from your Kazify Wallet to ${normalizedPhone}.`
+  );
+
+  res.json({
+    success: true,
+    wallet,
+    transaction: tx
+  });
 });
 
 // Audit ledger integrity of a user's wallet

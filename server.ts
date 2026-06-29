@@ -3367,171 +3367,253 @@ app.get(
 );
 
 // Submit KYC Document
-app.post('/api/kyc/submit', (req, res) => {
-  const { 
-    user_id, 
-    document_type, 
-    document_number, 
-    file_url, 
-    full_legal_name, 
-    kra_pin, 
-    date_of_birth, 
-    county_of_operation,
-    file_base64,
-    file_name 
-  } = req.body;
+app.post(
+  '/api/kyc/submit',
+  authenticateToken,
+  (req, res) => {
+    const {
+      user_id,
+      document_type,
+      document_number,
+      file_url,
+      full_legal_name,
+      kra_pin,
+      date_of_birth,
+      county_of_operation,
+      file_base64,
+      file_name
+    } = req.body;
 
-  let signatureCheck = 'skipped';
-  let malwareScan = 'clean';
-  let fileHash = '';
-  const complianceLogs: string[] = [];
+    const authUser = (req as AuthenticatedRequest).user;
 
-  const crypto = require('crypto');
-
-  if (file_base64) {
-    try {
-      // 1. Generate sha256 checksum of the payload for data integrity
-      const hash = crypto.createHash('sha256');
-      hash.update(file_base64);
-      fileHash = hash.digest('hex');
-      complianceLogs.push(`Generated secure payload checksum: SHA-256 ${fileHash}`);
-
-      // 2. Malware Scan: Check for EICAR standard antivirus test signature or simulated triggers
-      const base64Clean = file_base64.replace(/^data:.*?;base64,/, '');
-      const decodedBuffer = Buffer.from(base64Clean, 'base64');
-      const decodedString = decodedBuffer.toString('utf8');
-      
-      const lowerDecoded = decodedString.toLowerCase();
-      if (
-        decodedString.includes('EICAR-STANDARD-ANTIVIRUS-TEST-FILE') || 
-        lowerDecoded.includes('infected') || 
-        lowerDecoded.includes('malware') || 
-        lowerDecoded.includes('virus')
-      ) {
-        malwareScan = 'infected';
-        complianceLogs.push('ALERT: File ingestion aborted - matches active anti-malware block signature.');
-        return res.status(400).json({
-          success: false,
-          error: 'Security Quarantine: File failed malware scanning (EICAR check failed). Securely deleted.',
-          scan_status: 'infected',
-          logs: complianceLogs
-        });
-      }
-
-      // Check for code/script injection patterns
-      if (decodedString.includes('<script') || decodedString.includes('eval(') || decodedString.includes('/bin/sh')) {
-        malwareScan = 'suspicious';
-        complianceLogs.push('ALERT: Code execution signatures matched. Ingestion rejected.');
-        return res.status(400).json({
-          success: false,
-          error: 'Security Quarantine: Executable script or commands detected in document file scan. Rejected.',
-          scan_status: 'suspicious',
-          logs: complianceLogs
-        });
-      }
-
-      // 3. File Signature / Magic Bytes Validation
-      const headerBytes = decodedBuffer.slice(0, 4).toString('hex').toUpperCase();
-      let matchedSignature = false;
-      let detectedType = 'unknown';
-
-      // PNG: 89504E47
-      // PDF: 25504446
-      // JPG/JPEG: FFD8FF
-      if (headerBytes.startsWith('89504E47')) {
-        detectedType = 'image/png';
-        matchedSignature = true;
-      } else if (headerBytes.startsWith('25504446')) {
-        detectedType = 'application/pdf';
-        matchedSignature = true;
-      } else if (headerBytes.startsWith('FFD8FF')) {
-        detectedType = 'image/jpeg';
-        matchedSignature = true;
-      }
-
-      if (matchedSignature) {
-        signatureCheck = 'valid';
-        complianceLogs.push(`File magic bytes signature verified. Structure: ${headerBytes} matches MIME ${detectedType}.`);
-      } else {
-        // If file_name indicates standard text format, we allow it, otherwise reject
-        if (file_name && (file_name.endsWith('.txt') || file_name.endsWith('.json'))) {
-          signatureCheck = 'valid_text';
-          complianceLogs.push(`File accepted as verified text format (${file_name}).`);
-        } else {
-          signatureCheck = 'invalid';
-          complianceLogs.push(`CRITICAL: File signature header mismatch. Detected magic bytes: ${headerBytes || 'NONE'}`);
-          return res.status(400).json({
-            success: false,
-            error: 'File signature mismatch: Magic bytes did not match expected image/pdf headers.',
-            scan_status: 'signature_mismatch',
-            logs: complianceLogs
-          });
-        }
-      }
-    } catch (e: any) {
-      console.error('KYC file validation error:', e);
-      return res.status(500).json({ success: false, error: 'Internal failure during document ingestion checks.' });
-    }
-  } else if (file_url) {
-    // URL fallback simulator
-    fileHash = crypto.createHash('sha256').update(file_url).digest('hex');
-    const lowerUrl = file_url.toLowerCase();
-
-    if (lowerUrl.includes('malware') || lowerUrl.includes('eicar') || lowerUrl.includes('infected')) {
-      malwareScan = 'infected';
-      complianceLogs.push(`ALERT: Malware scan failed for simulated asset URL.`);
-      return res.status(400).json({
-        success: false,
-        error: 'Security Quarantine: simulated malware or virus trace detected.',
-        scan_status: 'infected'
+    if (authUser?.id !== user_id) {
+      return res.status(403).json({
+        error: 'Unauthorized: You may only submit your own KYC documents.'
       });
     }
 
-    signatureCheck = 'valid';
-    malwareScan = 'clean';
-    complianceLogs.push(`Checked remote asset headers. Integrity hash: ${fileHash}`);
-  } else {
-    // Generate empty mock signature
-    fileHash = crypto.createHash('sha256').update(`empty_${Date.now()}`).digest('hex');
-    signatureCheck = 'valid';
-    malwareScan = 'clean';
-    complianceLogs.push(`Default placeholder avatar ingested. SHA-256: ${fileHash}`);
+    const existingKyc = kycDocuments.find(
+      doc =>
+        doc.user_id === user_id &&
+        doc.document_type === document_type
+    );
+
+    if (existingKyc) {
+      return res.status(409).json({
+        error: `A ${document_type} document has already been submitted.`
+      });
+    }
+
+    let signatureCheck = 'skipped';
+    let malwareScan = 'clean';
+    let fileHash = '';
+    const complianceLogs: string[] = [];
+
+    const crypto = require('crypto');
+
+    if (file_base64) {
+      try {
+        // 1. Generate sha256 checksum of the payload for data integrity
+        const hash = crypto.createHash('sha256');
+        hash.update(file_base64);
+        fileHash = hash.digest('hex');
+        complianceLogs.push(`Generated secure payload checksum: SHA-256 ${fileHash}`);
+
+        // 2. Malware Scan: Check for EICAR standard antivirus test signature or simulated triggers
+        const base64Clean = file_base64.replace(/^data:.*?;base64,/, '');
+        const decodedBuffer = Buffer.from(base64Clean, 'base64');
+        const decodedString = decodedBuffer.toString('utf8');
+
+        const lowerDecoded = decodedString.toLowerCase();
+
+        if (
+          decodedString.includes('EICAR-STANDARD-ANTIVIRUS-TEST-FILE') ||
+          lowerDecoded.includes('infected') ||
+          lowerDecoded.includes('malware') ||
+          lowerDecoded.includes('virus')
+        ) {
+          malwareScan = 'infected';
+          complianceLogs.push('ALERT: File ingestion aborted - matches active anti-malware block signature.');
+
+          return res.status(400).json({
+            success: false,
+            error: 'Security Quarantine: File failed malware scanning (EICAR check failed). Securely deleted.',
+            scan_status: 'infected',
+            logs: complianceLogs
+          });
+        }
+
+        // Check for code/script injection patterns
+        if (
+          decodedString.includes('<script') ||
+          decodedString.includes('eval(') ||
+          decodedString.includes('/bin/sh')
+        ) {
+          malwareScan = 'suspicious';
+          complianceLogs.push('ALERT: Code execution signatures matched. Ingestion rejected.');
+
+          return res.status(400).json({
+            success: false,
+            error: 'Security Quarantine: Executable script or commands detected in document file scan. Rejected.',
+            scan_status: 'suspicious',
+            logs: complianceLogs
+          });
+        }
+
+        // 3. File Signature / Magic Bytes Validation
+        const headerBytes = decodedBuffer
+          .slice(0, 4)
+          .toString('hex')
+          .toUpperCase();
+
+        let matchedSignature = false;
+        let detectedType = 'unknown';
+
+        // PNG: 89504E47
+        // PDF: 25504446
+        // JPG/JPEG: FFD8FF
+        if (headerBytes.startsWith('89504E47')) {
+          detectedType = 'image/png';
+          matchedSignature = true;
+        } else if (headerBytes.startsWith('25504446')) {
+          detectedType = 'application/pdf';
+          matchedSignature = true;
+        } else if (headerBytes.startsWith('FFD8FF')) {
+          detectedType = 'image/jpeg';
+          matchedSignature = true;
+        }
+
+        if (matchedSignature) {
+          signatureCheck = 'valid';
+          complianceLogs.push(
+            `File magic bytes signature verified. Structure: ${headerBytes} matches MIME ${detectedType}.`
+          );
+        } else {
+          // If file_name indicates standard text format, we allow it, otherwise reject
+          if (
+            file_name &&
+            (file_name.endsWith('.txt') ||
+              file_name.endsWith('.json'))
+          ) {
+            signatureCheck = 'valid_text';
+            complianceLogs.push(
+              `File accepted as verified text format (${file_name}).`
+            );
+          } else {
+            signatureCheck = 'invalid';
+            complianceLogs.push(
+              `CRITICAL: File signature header mismatch. Detected magic bytes: ${headerBytes || 'NONE'}`
+            );
+
+            return res.status(400).json({
+              success: false,
+              error: 'File signature mismatch: Magic bytes did not match expected image/pdf headers.',
+              scan_status: 'signature_mismatch',
+              logs: complianceLogs
+            });
+          }
+        }
+      } catch (e: any) {
+        console.error('KYC file validation error:', e);
+
+        return res.status(500).json({
+          success: false,
+          error: 'Internal failure during document ingestion checks.'
+        });
+      }
+    } else if (file_url) {
+      // URL fallback simulator
+      fileHash = crypto
+        .createHash('sha256')
+        .update(file_url)
+        .digest('hex');
+
+      const lowerUrl = file_url.toLowerCase();
+
+      if (
+        lowerUrl.includes('malware') ||
+        lowerUrl.includes('eicar') ||
+        lowerUrl.includes('infected')
+      ) {
+        malwareScan = 'infected';
+
+        complianceLogs.push(
+          'ALERT: Malware scan failed for simulated asset URL.'
+        );
+
+        return res.status(400).json({
+          success: false,
+          error: 'Security Quarantine: simulated malware or virus trace detected.',
+          scan_status: 'infected'
+        });
+      }
+
+      signatureCheck = 'valid';
+      malwareScan = 'clean';
+
+      complianceLogs.push(
+        `Checked remote asset headers. Integrity hash: ${fileHash}`
+      );
+    } else {
+      // Generate empty mock signature
+      fileHash = crypto
+        .createHash('sha256')
+        .update(`empty_${Date.now()}`)
+        .digest('hex');
+
+      signatureCheck = 'valid';
+      malwareScan = 'clean';
+
+      complianceLogs.push(
+        `Default placeholder avatar ingested. SHA-256: ${fileHash}`
+      );
+    }
+
+    const newDoc: LocalKYCDocument = {
+      id: `kyc_${Date.now()}`,
+      user_id,
+      document_type,
+      document_number,
+      file_url:
+        file_url ||
+        'https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400',
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      full_legal_name: full_legal_name || undefined,
+      kra_pin: kra_pin || undefined,
+      date_of_birth: date_of_birth || undefined,
+      county_of_operation: county_of_operation || undefined,
+      file_sha256: fileHash,
+      malware_scan_status: malwareScan,
+      signature_check: signatureCheck,
+      compliance_logs: complianceLogs
+    };
+
+    kycDocuments.push(newDoc);
+
+    createNotification(
+      user_id,
+      'KYC Submitted',
+      'Your identity verification documents have been received and are pending administrator review.'
+    );
+
+    const submitter = users.find(u => u.id === user_id);
+    const nameToUse = submitter ? submitter.name : 'A user';
+
+    notifyAdmins(
+      'New KYC Document Ingested & Scanned 🛡️',
+      `${nameToUse} has submitted a new ${document_type.replace('_', ' ')} (ID: ${document_number}). Malware Scan: ${malwareScan.toUpperCase()}, Signature: ${signatureCheck.toUpperCase()}, Checksum: ${fileHash.substring(0, 12)}...`,
+      'new_kyc_submission',
+      newDoc
+    );
+
+    res.json({
+      success: true,
+      document: newDoc
+    });
   }
-
-  const newDoc: LocalKYCDocument = {
-    id: `kyc_${Date.now()}`,
-    user_id,
-    document_type,
-    document_number,
-    file_url: file_url || "https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=400",
-    status: 'pending',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    full_legal_name: full_legal_name || undefined,
-    kra_pin: kra_pin || undefined,
-    date_of_birth: date_of_birth || undefined,
-    county_of_operation: county_of_operation || undefined,
-    file_sha256: fileHash,
-    malware_scan_status: malwareScan,
-    signature_check: signatureCheck,
-    compliance_logs: complianceLogs
-  };
-
-  kycDocuments.push(newDoc);
-
-  createNotification(user_id, "KYC Submitted", "Your identity verification documents have been received and are pending administrator review.");
-  
-  const submitter = users.find(u => u.id === user_id);
-  const nameToUse = submitter ? submitter.name : 'A user';
-  notifyAdmins(
-    "New KYC Document Ingested & Scanned 🛡️",
-    `${nameToUse} has submitted a new ${document_type.replace('_', ' ')} (ID: ${document_number}). Malware Scan: ${malwareScan.toUpperCase()}, Signature: ${signatureCheck.toUpperCase()}, Checksum: ${fileHash.substring(0, 12)}...`,
-    'new_kyc_submission',
-    newDoc
-  );
-
-  res.json({ success: true, document: newDoc });
-});
+);
 
 // Admin: Get all KYC submissions
 app.get('/api/admin/kyc', authenticateToken, requireAdmin, (req, res) => {

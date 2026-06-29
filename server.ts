@@ -554,7 +554,13 @@ interface ImmutableAuditEntry {
   timestamp: string;
   operatorId: string;
   operatorName: string;
-  action: 'PAYMENT_STATE_CHANGE' | 'CONTRACT_APPROVAL' | 'KYC_STATUS_UPDATE' | 'ROLE_CHANGE' | 'SECURITY_Sentinel';
+  action:
+    | 'PAYMENT_STATE_CHANGE'
+    | 'CONTRACT_APPROVAL'
+    | 'CONTRACT_NEGOTIATION'
+    | 'KYC_STATUS_UPDATE'
+    | 'ROLE_CHANGE'
+    | 'SECURITY_Sentinel';
   targetType: 'payment' | 'contract' | 'kyc' | 'user';
   targetId: string;
   statusBefore: string;
@@ -576,7 +582,13 @@ function computeAuditHash(entry: Omit<ImmutableAuditEntry, 'currentHash'>): stri
 function recordSensitiveStateChange(
   operatorId: string,
   operatorName: string,
-  action: 'PAYMENT_STATE_CHANGE' | 'CONTRACT_APPROVAL' | 'KYC_STATUS_UPDATE' | 'ROLE_CHANGE' | 'SECURITY_Sentinel',
+  action:
+    | 'PAYMENT_STATE_CHANGE'
+    | 'CONTRACT_APPROVAL'
+    | 'CONTRACT_NEGOTIATION'
+    | 'KYC_STATUS_UPDATE'
+    | 'ROLE_CHANGE'
+    | 'SECURITY_Sentinel',
   targetType: 'payment' | 'contract' | 'kyc' | 'user',
   targetId: string,
   statusBefore: string,
@@ -586,8 +598,10 @@ function recordSensitiveStateChange(
   userAgent?: string
 ) {
   const previousEntry = immutableAuditTrail[0];
-  const previousHash = previousEntry ? previousEntry.currentHash : '0000000000000000000000000000000000000000000000000000000000000000';
-  
+  const previousHash = previousEntry
+    ? previousEntry.currentHash
+    : '0000000000000000000000000000000000000000000000000000000000000000';
+
   const entry: ImmutableAuditEntry = {
     id: `SEC-AUD-${Math.floor(10000 + Math.random() * 90000)}`,
     timestamp: new Date().toISOString(),
@@ -615,14 +629,23 @@ function recordSensitiveStateChange(
     adminId: operatorId,
     adminName: operatorName,
     action: `${action} [SECURE_HASH_CHAINED]`,
-    targetType: targetType === 'payment' ? 'wallet' : (targetType === 'contract' ? 'system' : (targetType === 'kyc' ? 'kyc' : 'user')),
+    targetType:
+      targetType === 'payment'
+        ? 'wallet'
+        : targetType === 'contract'
+          ? 'system'
+          : targetType === 'kyc'
+            ? 'kyc'
+            : 'user',
     targetId,
     details: `${details} (Current Hash: ${entry.currentHash.substring(0, 16)}... Chained to Prev Hash: ${entry.previousHash.substring(0, 16)}...)`,
     ipAddress: entry.ipAddress,
     userActivity: `UserAgent: ${entry.userAgent}`
   });
 
-  console.log(`[IMMUTABLE AUDIT LEDGER] Chained event ${entry.id}. Action: ${entry.action}, Hash: ${entry.currentHash}`);
+  console.log(
+    `[IMMUTABLE AUDIT LEDGER] Chained event ${entry.id}. Action: ${entry.action}, Hash: ${entry.currentHash}`
+  );
 }
 
 function evaluateFraudAndVelocityRules(userId: string, type: 'login' | 'transaction', reqContext: { ip: string; amount?: number }) {
@@ -3874,58 +3897,139 @@ app.post(
 );
 
 // Propose terms / negotiate contract
-app.post('/api/contracts/:id/negotiate', (req, res) => {
-  const contractId = req.params.id;
-  const { user_id, terms, amount } = req.body;
+app.post(
+  '/api/contracts/:id/negotiate',
+  authenticateToken,
+  (req, res) => {
+    const contractId = req.params.id;
+    const { terms, amount } = req.body;
 
-  const contract = contracts.find(c => c.id === contractId);
-  if (!contract) {
-    return res.status(404).json({ error: 'Contract not found' });
-  }
+    const authUser = (req as AuthenticatedRequest).user;
 
-  if (contract.status !== 'draft') {
-    return res.status(400).json({ error: 'Contract is already locked or active and cannot be negotiated' });
-  }
+    if (!authUser) {
+      return res.status(401).json({
+        error: 'Authentication required.'
+      });
+    }
 
-  // Update terms and reset signatures since terms changed
-  if (terms) {
-    contract.terms = terms;
-  }
-  
-  if (amount) {
-    const numAmt = parseFloat(amount);
-    if (!isNaN(numAmt) && numAmt > 0) {
+    const contract = contracts.find(c => c.id === contractId);
+
+    if (!contract) {
+      return res.status(404).json({
+        error: 'Contract not found'
+      });
+    }
+
+    // Only contract participants may negotiate
+    const isParticipant =
+      contract.customer_id === authUser.id ||
+      contract.fundi_id === authUser.id;
+
+    if (!isParticipant) {
+      return res.status(403).json({
+        error: 'You are not authorized to negotiate this contract.'
+      });
+    }
+
+    // Only draft contracts may be negotiated
+    if (contract.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Contract is already locked or active and cannot be negotiated'
+      });
+    }
+
+    // Require at least one field to update
+    if (
+      (terms === undefined ||
+        (typeof terms === 'string' && terms.trim() === '')) &&
+      amount === undefined
+    ) {
+      return res.status(400).json({
+        error: 'Provide updated terms or amount.'
+      });
+    }
+
+    let changes: string[] = [];
+
+    // Update contract terms
+    if (typeof terms === 'string' && terms.trim() !== '') {
+      contract.terms = terms.trim();
+      changes.push('terms');
+    }
+
+    // Validate and update amount
+    if (amount !== undefined) {
+      const numAmt = Number(amount);
+
+      if (!Number.isFinite(numAmt) || numAmt <= 0) {
+        return res.status(400).json({
+          error: 'Amount must be a positive number.'
+        });
+      }
+
       contract.amount = numAmt;
-      
-      // Update the linked job amount and escrow account details too
+      changes.push(`amount to KES ${numAmt}`);
+
+      // Update linked job
       const job = jobs.find(j => j.id === contract.job_id);
+
       if (job) {
         job.amount = numAmt;
       }
-      
-      const escrow = escrowAccounts.find(e => e.job_id === contract.job_id);
+
+      // Update escrow
+      const escrow = escrowAccounts.find(
+        e => e.job_id === contract.job_id
+      );
+
       if (escrow) {
         const commission = Math.round(numAmt * 0.10);
+
         escrow.amount = numAmt;
         escrow.commission_fee = commission;
         escrow.payout_amount = numAmt - commission;
       }
     }
+
+    // Reset signatures because the agreement changed
+    contract.customer_signed = false;
+    contract.fundi_signed = false;
+    contract.customer_signed_at = undefined;
+    contract.fundi_signed_at = undefined;
+    contract.updated_at = new Date().toISOString();
+
+    // Immutable audit log
+    recordSensitiveStateChange(
+      authUser.id,
+      authUser.name,
+      'CONTRACT_NEGOTIATION',
+      'contract',
+      contract.id,
+      'draft',
+      'draft',
+      `Contract updated (${changes.join(', ')}). Signatures reset pending re-approval.`,
+      req.ip,
+      req.headers['user-agent'] as string
+    );
+
+    // Notify the other party
+    const alertTarget =
+      authUser.id === contract.customer_id
+        ? contract.fundi_id
+        : contract.customer_id;
+
+    createNotification(
+      alertTarget,
+      'Contract Terms Updated',
+      'The other party has updated the contract terms or pricing. Please review and sign.'
+    );
+
+    res.json({
+      success: true,
+      contract
+    });
   }
-
-  // Reset signature stamps as terms have evolved
-  contract.customer_signed = false;
-  contract.fundi_signed = false;
-  contract.customer_signed_at = undefined;
-  contract.fundi_signed_at = undefined;
-  contract.updated_at = new Date().toISOString();
-
-  // Send alerts
-  const alertTarget = user_id === contract.customer_id ? contract.fundi_id : contract.customer_id;
-  createNotification(alertTarget, "Contract Terms Updated", "The other party has updated the contract terms or pricing. Please review and sign.");
-
-  res.json({ success: true, contract });
-});
+);
 
 // --- DISPUTE SYSTEM ENDPOINTS ---
 

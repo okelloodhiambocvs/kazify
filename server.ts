@@ -3793,19 +3793,80 @@ app.post('/api/contracts/:id/negotiate', (req, res) => {
   res.json({ success: true, contract });
 });
 
-
-
 // --- DISPUTE SYSTEM ENDPOINTS ---
 
 // Raise a dispute on a job
-app.post('/api/disputes/raise', (req, res) => {
-  const { job_id, initiator_id, reason, description, completion_percentage, evidence_attachments } = req.body;
+app.post('/api/disputes/raise', authenticateToken, (req, res) => {
+  const {
+    job_id,
+    initiator_id,
+    reason,
+    description,
+    completion_percentage,
+    evidence_attachments
+  } = req.body;
+
+  const authUser = (req as AuthenticatedRequest).user;
+
+  // Authentication required
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  // Prevent impersonation
+  if (initiator_id !== authUser.id) {
+    return res.status(403).json({
+      error: 'You may only raise disputes on your own behalf.'
+    });
+  }
 
   const job = jobs.find(j => j.id === job_id);
   const user = users.find(u => u.id === initiator_id);
 
   if (!job || !user) {
-    return res.status(404).json({ error: 'Job or user not found' });
+    return res.status(404).json({
+      error: 'Job or user not found'
+    });
+  }
+
+  // Only the customer or assigned fundi may raise a dispute
+  const isParticipant =
+    job.customer_id === authUser.id ||
+    job.fundi_id === authUser.id;
+
+  if (!isParticipant) {
+    return res.status(403).json({
+      error: 'You are not a participant in this job.'
+    });
+  }
+
+  // Only allow disputes on valid job states
+  const allowedStatuses = [
+    'accepted',
+    'active',
+    'in_progress',
+    'completed'
+  ];
+
+  if (!allowedStatuses.includes(job.status)) {
+    return res.status(400).json({
+      error: `Cannot raise a dispute while the job is '${job.status}'.`
+    });
+  }
+
+  // Prevent duplicate active disputes
+  const existingDispute = disputes.find(
+    d =>
+      d.job_id === job_id &&
+      d.status === 'pending'
+  );
+
+  if (existingDispute) {
+    return res.status(409).json({
+      error: 'An active dispute already exists for this job.'
+    });
   }
 
   const dispute: LocalDispute = {
@@ -3817,26 +3878,45 @@ app.post('/api/disputes/raise', (req, res) => {
     description,
     status: 'pending',
     created_at: new Date().toISOString(),
-    completion_percentage: completion_percentage !== undefined ? Number(completion_percentage) : undefined,
+    completion_percentage:
+      completion_percentage !== undefined
+        ? Number(completion_percentage)
+        : undefined,
     evidence_attachments: evidence_attachments || []
   };
 
   disputes.unshift(dispute);
 
   job.status = 'disputed';
+
   const escAcc = escrowAccounts.find(ea => ea.job_id === job_id);
+
   if (escAcc) {
     escAcc.status = 'disputed';
     escAcc.updated_at = new Date().toISOString();
   }
 
-  const notifyUser = initiator_id === job.customer_id ? job.fundi_id : job.customer_id;
+  const notifyUser =
+    initiator_id === job.customer_id
+      ? job.fundi_id
+      : job.customer_id;
+
   if (notifyUser) {
-    createNotification(notifyUser, "Dispute Raised on Project", `A formal dispute has been initiated on "${job.title}". A platform administrator will arbitrate shortly.`);
+    createNotification(
+      notifyUser,
+      "Dispute Raised on Project",
+      `A formal dispute has been initiated on "${job.title}". A platform administrator will arbitrate shortly.`
+    );
   }
-  createNotification(initiator_id, "Dispute Raised Successful", "Your dispute request has been lodged. A platform admin is reviewing the contract.");
-  
+
+  createNotification(
+    initiator_id,
+    "Dispute Raised Successful",
+    "Your dispute request has been lodged. A platform admin is reviewing the contract."
+  );
+
   const isHighValue = job.amount >= 20000;
+
   if (isHighValue) {
     notifyAdmins(
       "🔥 HIGH-VALUE DISPUTE FILED",
@@ -3853,7 +3933,11 @@ app.post('/api/disputes/raise', (req, res) => {
     );
   }
 
-  res.json({ success: true, dispute, job });
+  res.json({
+    success: true,
+    dispute,
+    job
+  });
 });
 
 // Get dispute for a job
@@ -3880,34 +3964,88 @@ app.get('/api/disputes', (req, res) => {
 });
 
 // Send dispute chat message
-app.post('/api/disputes/:id/message', (req, res) => {
-  const disputeId = req.params.id;
-  const { sender_id, sender_name, message } = req.body;
+app.post(
+  '/api/disputes/:id/message',
+  authenticateToken,
+  (req, res) => {
+    const disputeId = req.params.id;
+    const { message } = req.body;
 
-  const msg: LocalDisputeMessage = {
-    id: `dmsg_${Date.now()}`,
-    dispute_id: disputeId,
-    sender_id,
-    sender_name,
-    message,
-    created_at: new Date().toISOString()
-  };
+    const sender = (req as AuthenticatedRequest).user;
 
-  disputeMessages.push(msg);
-
-  const dispute = disputes.find(d => d.id === disputeId);
-  if (dispute) {
-    const job = jobs.find(j => j.id === dispute.job_id);
-    if (job) {
-      const notifyUser = sender_id === job.customer_id ? job.fundi_id : job.customer_id;
-      if (notifyUser && sender_id !== notifyUser) {
-        createNotification(notifyUser, "New Dispute Message", `Dispute message in job "${job.title}": ${message.substring(0, 40)}...`);
-      }
+    if (!message || !message.trim()) {
+      return res.status(400).json({
+        error: 'Message cannot be empty.'
+      });
     }
-  }
 
-  res.json(msg);
-});
+    const dispute = disputes.find(d => d.id === disputeId);
+
+    if (!dispute) {
+      return res.status(404).json({
+        error: 'Dispute not found.'
+      });
+    }
+
+    const job = jobs.find(j => j.id === dispute.job_id);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Associated job not found.'
+      });
+    }
+
+    // Only dispute participants or admins may send messages
+    const isParticipant =
+      sender.id === job.customer_id ||
+      sender.id === job.fundi_id ||
+      sender.role === 'admin';
+
+    if (!isParticipant) {
+      return res.status(403).json({
+        error: 'You are not authorized to participate in this dispute.'
+      });
+    }
+
+    // Prevent messaging after dispute resolution
+    if (dispute.status !== 'pending') {
+      return res.status(409).json({
+        error: 'This dispute has already been resolved.'
+      });
+    }
+
+    const msg: LocalDisputeMessage = {
+      id: `dmsg_${Date.now()}`,
+      dispute_id: disputeId,
+      sender_id: sender.id,
+      sender_name: sender.name,
+      message: message.trim(),
+      created_at: new Date().toISOString()
+    };
+
+    disputeMessages.push(msg);
+
+    const notifyUser =
+      sender.id === job.customer_id
+        ? job.fundi_id
+        : job.customer_id;
+
+    if (notifyUser && notifyUser !== sender.id) {
+      createNotification(
+        notifyUser,
+        "New Dispute Message",
+        `Dispute message in job "${job.title}": ${message
+          .trim()
+          .substring(0, 40)}...`
+      );
+    }
+
+    res.json({
+      success: true,
+      message: msg
+    });
+  }
+);
 
 // Get dispute chat messages
 app.get('/api/disputes/:id/messages', (req, res) => {

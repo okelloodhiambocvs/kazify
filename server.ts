@@ -3345,11 +3345,26 @@ app.post(
 // --- KYC DOCUMENT ENDPOINTS ---
 
 // Get user KYC documents
-app.get('/api/kyc/:user_id', (req, res) => {
-  const userId = req.params.user_id;
-  const docs = kycDocuments.filter(kd => kd.user_id === userId);
-  res.json(docs);
-});
+app.get(
+  '/api/kyc/:user_id',
+  authenticateToken,
+  (req, res) => {
+    const userId = req.params.user_id;
+    const authUser = (req as AuthenticatedRequest).user;
+
+    if (
+      authUser?.id !== userId &&
+      authUser?.role !== 'admin'
+    ) {
+      return res.status(403).json({
+        error: 'Unauthorized: You cannot view another user’s KYC documents.'
+      });
+    }
+
+    const docs = kycDocuments.filter(kd => kd.user_id === userId);
+    res.json(docs);
+  }
+);
 
 // Submit KYC Document
 app.post('/api/kyc/submit', (req, res) => {

@@ -3706,11 +3706,45 @@ app.get(
 );
 
 // Get all contracts for a user
-app.get('/api/contracts/user/:user_id', (req, res) => {
-  const userId = req.params.user_id;
-  const filtered = contracts.filter(c => c.customer_id === userId || c.fundi_id === userId);
-  res.json(filtered);
-});
+app.get(
+  '/api/contracts/user/:user_id',
+  authenticateToken,
+  (req, res) => {
+    const userId = req.params.user_id;
+    const authUser = (req as AuthenticatedRequest).user;
+
+    // Authentication required
+    if (!authUser) {
+      return res.status(401).json({
+        error: 'Authentication required.'
+      });
+    }
+
+    // Only the owner or an administrator may view these contracts
+    const isOwner = authUser.id === userId;
+    const isAdmin = authUser.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        error: 'You are not authorized to view these contracts.'
+      });
+    }
+
+    const filtered = contracts.filter(
+      contract =>
+        contract.customer_id === userId ||
+        contract.fundi_id === userId
+    );
+
+    if (filtered.length === 0) {
+      return res.status(404).json({
+        error: 'No contracts found.'
+      });
+    }
+
+    res.json(filtered);
+  }
+);
 
 // Sign Contract
 app.post('/api/contracts/:id/sign', (req, res) => {

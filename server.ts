@@ -3747,52 +3747,131 @@ app.get(
 );
 
 // Sign Contract
-app.post('/api/contracts/:id/sign', (req, res) => {
-  const contractId = req.params.id;
-  const { user_id, role } = req.body;
+app.post(
+  '/api/contracts/:id/sign',
+  authenticateToken,
+  (req, res) => {
+    const contractId = req.params.id;
+    const { role } = req.body;
 
-  const contract = contracts.find(c => c.id === contractId);
-  if (!contract) {
-    return res.status(404).json({ error: 'Contract not found' });
+    const authUser = (req as AuthenticatedRequest).user;
+
+    if (!authUser) {
+      return res.status(401).json({
+        error: 'Authentication required.'
+      });
+    }
+
+    const contract = contracts.find(c => c.id === contractId);
+
+    if (!contract) {
+      return res.status(404).json({
+        error: 'Contract not found'
+      });
+    }
+
+    // Only draft contracts may be signed
+    if (contract.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Only draft contracts can be signed.'
+      });
+    }
+
+    // Determine the authenticated user's expected role
+    const expectedRole =
+      contract.customer_id === authUser.id
+        ? 'customer'
+        : contract.fundi_id === authUser.id
+          ? 'fundi'
+          : null;
+
+    // User must be a participant in this contract
+    if (!expectedRole) {
+      return res.status(403).json({
+        error: 'You are not a party to this contract.'
+      });
+    }
+
+    // Prevent role spoofing
+    if (role !== expectedRole) {
+      return res.status(403).json({
+        error: 'Role does not match your account.'
+      });
+    }
+
+    const statusBefore = contract.status;
+
+    if (role === 'customer') {
+      if (contract.customer_signed) {
+        return res.status(409).json({
+          error: 'Customer has already signed this contract.'
+        });
+      }
+
+      contract.customer_signed = true;
+      contract.customer_signed_at = new Date().toISOString();
+    } else if (role === 'fundi') {
+      if (contract.fundi_signed) {
+        return res.status(409).json({
+          error: 'Fundi has already signed this contract.'
+        });
+      }
+
+      contract.fundi_signed = true;
+      contract.fundi_signed_at = new Date().toISOString();
+    } else {
+      return res.status(400).json({
+        error: 'Invalid contract role.'
+      });
+    }
+
+    if (contract.customer_signed && contract.fundi_signed) {
+      contract.status = 'active';
+
+      createNotification(
+        contract.customer_id,
+        'Contract Fully Executed',
+        'Both parties have signed the contract. Escrow payment is now requested.'
+      );
+
+      createNotification(
+        contract.fundi_id,
+        'Contract Fully Executed',
+        'The contract is now fully signed. Secure escrow payment is being initialized by the client.'
+      );
+
+      // Centralized Immutable Audit logging for contract execution approval
+      recordSensitiveStateChange(
+        authUser.id,
+        role === 'customer' ? 'Client Operator' : 'Fundi Operator',
+        'CONTRACT_APPROVAL',
+        'contract',
+        contractId,
+        statusBefore,
+        'active',
+        `Contract #${contractId.substring(0, 8)} has been fully executed and approved by both parties. Job amount KES ${contract.amount}.`,
+        req.ip,
+        req.headers['user-agent'] as string
+      );
+    } else {
+      const notifyUser =
+        role === 'customer'
+          ? contract.fundi_id
+          : contract.customer_id;
+
+      createNotification(
+        notifyUser,
+        'Contract Signature Added',
+        'The other party has signed the work agreement. Please sign to proceed.'
+      );
+    }
+
+    res.json({
+      success: true,
+      contract
+    });
   }
-
-  const statusBefore = contract.status;
-
-  if (role === 'customer' && contract.customer_id === user_id) {
-    contract.customer_signed = true;
-    contract.customer_signed_at = new Date().toISOString();
-  } else if (role === 'fundi' && contract.fundi_id === user_id) {
-    contract.fundi_signed = true;
-    contract.fundi_signed_at = new Date().toISOString();
-  } else {
-    return res.status(403).json({ error: 'Not authorized to sign this contract' });
-  }
-
-  if (contract.customer_signed && contract.fundi_signed) {
-    contract.status = 'active';
-    createNotification(contract.customer_id, "Contract Fully Executed", `Both parties have signed the contract. Escrow payment is now requested.`);
-    createNotification(contract.fundi_id, "Contract Fully Executed", `The contract is now fully signed. Secure escrow payment is being initialized by the client.`);
-
-    // Centralized Immutable Audit logging for contract execution approval
-    recordSensitiveStateChange(
-      user_id,
-      role === 'customer' ? 'Client Operator' : 'Fundi Operator',
-      'CONTRACT_APPROVAL',
-      'contract',
-      contractId,
-      statusBefore,
-      'active',
-      `Contract #${contractId.substring(0, 8)} has been fully executed and approved by both parties. Job amount KES ${contract.amount}.`,
-      req.ip,
-      req.headers['user-agent'] as string
-    );
-  } else {
-    const notifyUser = role === 'customer' ? contract.fundi_id : contract.customer_id;
-    createNotification(notifyUser, "Contract Signature Added", `The other party has signed the work agreement. Please sign to proceed.`);
-  }
-
-  res.json({ success: true, contract });
-});
+);
 
 // Propose terms / negotiate contract
 app.post('/api/contracts/:id/negotiate', (req, res) => {

@@ -3948,20 +3948,40 @@ app.get('/api/disputes/job/:job_id', (req, res) => {
   res.json(dispute);
 });
 
-// Get all disputes
-app.get('/api/disputes', (req, res) => {
-  const enriched = disputes.map(d => {
-    const job = jobs.find(j => j.id === d.job_id);
-    return {
-      ...d,
-      job_title: job?.title,
-      customer_name: job?.customer_name,
-      fundi_name: job?.fundi_name,
-      amount: job?.amount
-    };
-  });
-  res.json(enriched);
-});
+// Get all disputes (Admin Only)
+app.get(
+  '/api/disputes',
+  authenticateToken,
+  requireAdmin,
+  (req, res) => {
+    const admin = (req as AuthenticatedRequest).user;
+
+    const enriched = disputes.map(d => {
+      const job = jobs.find(j => j.id === d.job_id);
+
+      return {
+        ...d,
+        job_title: job?.title,
+        customer_name: job?.customer_name,
+        fundi_name: job?.fundi_name,
+        amount: job?.amount
+      };
+    });
+
+    recordAdminAudit(
+      admin.id,
+      admin.name,
+      'VIEW_DISPUTES',
+      'dispute',
+      'all',
+      'Viewed all dispute records.',
+      req.ip,
+      req.headers['user-agent']
+    );
+
+    res.json(enriched);
+  }
+);
 
 // Send dispute chat message
 app.post(

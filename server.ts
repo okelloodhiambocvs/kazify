@@ -3225,10 +3225,27 @@ app.post(
       });
     }
 
-    // Prevent customers from paying escrow for someone else's job
+    // Step 3.2 — Ensure the authenticated customer owns the job
     if (job.customer_id !== authUser.id) {
       return res.status(403).json({
         error: 'Unauthorized: You may only fund escrow for your own jobs.'
+      });
+    }
+
+    // Step 3.4 — Reject completed or cancelled jobs
+    if (
+      job.status === 'completed' ||
+      job.status === 'cancelled'
+    ) {
+      return res.status(400).json({
+        error: 'Escrow cannot be funded for completed or cancelled jobs.'
+      });
+    }
+
+    // Step 3.3 — Prevent duplicate escrow funding
+    if (job.escrow_status === 'held') {
+      return res.status(409).json({
+        error: 'Escrow has already been funded for this job.'
       });
     }
 

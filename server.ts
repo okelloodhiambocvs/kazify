@@ -4542,33 +4542,66 @@ app.get('/api/escrow/accounts/job/:jobId', (req, res) => {
 app.post('/api/escrow/:jobId/milestones', authenticateToken, (req, res) => {
   const jobId = req.params.jobId;
   const { title, amount, fundiId } = req.body;
-  const user = (req as AuthenticatedRequest).user;
 
-  if (!title || !amount || amount <= 0) {
-    return res.status(400).json({ error: 'Invalid title or amount for milestone.' });
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  if (
+    !title ||
+    typeof title !== 'string' ||
+    !Number.isFinite(Number(amount)) ||
+    Number(amount) <= 0
+  ) {
+    return res.status(400).json({
+      error: 'Invalid milestone data.'
+    });
   }
 
   const job = jobs.find(j => j.id === jobId);
+
   if (!job) {
-    return res.status(404).json({ error: 'Job not found.' });
+    return res.status(404).json({
+      error: 'Job not found.'
+    });
+  }
+
+  // Only the customer who owns the job or an administrator may create milestones
+  const authorized =
+    authUser.role === 'admin' ||
+    job.customer_id === authUser.id;
+
+  if (!authorized) {
+    return res.status(403).json({
+      error: 'Only the customer or an administrator may create escrow milestones.'
+    });
   }
 
   const customerId = job.customer_id;
   const targetFundiId = fundiId || job.fundi_id;
 
   if (!targetFundiId) {
-    return res.status(400).json({ error: 'Cannot create milestone without a registered tradesperson.' });
+    return res.status(400).json({
+      error: 'Cannot create milestone without a registered tradesperson.'
+    });
   }
 
   // Check customer wallet balance
   let wallet = wallets.find(w => w.user_id === customerId);
-  if (!wallet || wallet.balance < amount) {
-    return res.status(400).json({ error: 'Insufficient wallet balance to fund this milestone. Please top up.' });
+
+  if (!wallet || wallet.balance < Number(amount)) {
+    return res.status(400).json({
+      error: 'Insufficient wallet balance to fund this milestone. Please top up.'
+    });
   }
 
   try {
     // Deduct balance from customer wallet
-    wallet.balance -= amount;
+    wallet.balance -= Number(amount);
     wallet.updated_at = new Date().toISOString();
 
     // Log wallet transaction for audit
@@ -4576,7 +4609,7 @@ app.post('/api/escrow/:jobId/milestones', authenticateToken, (req, res) => {
       id: `wtx_${Date.now()}_milestone_fund`,
       wallet_id: wallet.id,
       user_id: customerId,
-      amount: -amount,
+      amount: -Number(amount),
       type: 'escrow_hold',
       description: `Funded Milestone: "${title}" for "${job.title}"`,
       reference_id: jobId,
@@ -4588,21 +4621,58 @@ app.post('/api/escrow/:jobId/milestones', authenticateToken, (req, res) => {
       customerId,
       fundiId: targetFundiId,
       title,
-      amount
+      amount: Number(amount)
     });
 
     job.escrow_status = 'held';
 
+    // Immutable audit trail
+    recordSensitiveStateChange(
+      authUser.id,
+      authUser.name,
+      'PAYMENT_STATE_CHANGE',
+      'payment',
+      result.escrowAccount.id,
+      'milestone_pending',
+      'milestone_created',
+      `Created escrow milestone "${title}" worth KES ${Number(amount)} for job "${job.title}".`,
+      req.ip,
+      req.headers['user-agent'] as string
+    );
+
     // Notify fundi
-    createNotification(targetFundiId, "Milestone Funded! 🚀", `The client has funded a milestone: "${title}" (KES ${amount}) for job "${job.title}".`);
-    createNotification(customerId, "Milestone Funded", `You successfully funded milestone "${title}" for KES ${amount}.`);
+    createNotification(
+      targetFundiId,
+      'Milestone Funded! 🚀',
+      `The client has funded a milestone: "${title}" (KES ${Number(amount)}) for job "${job.title}".`
+    );
 
-    sendWSMessage(customerId, { type: 'milestone_funded', job, milestone: result.milestone });
-    sendWSMessage(targetFundiId, { type: 'milestone_funded', job, milestone: result.milestone });
+    createNotification(
+      customerId,
+      'Milestone Funded',
+      `You successfully funded milestone "${title}" for KES ${Number(amount)}.`
+    );
 
-    res.json({ success: true, ...result });
+    sendWSMessage(customerId, {
+      type: 'milestone_funded',
+      job,
+      milestone: result.milestone
+    });
+
+    sendWSMessage(targetFundiId, {
+      type: 'milestone_funded',
+      job,
+      milestone: result.milestone
+    });
+
+    res.json({
+      success: true,
+      ...result
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message
+    });
   }
 });
 

@@ -2716,8 +2716,36 @@ app.post('/api/payments/charge', (req, res) => {
 });
 
 // PAYMENTS: Escrow history
-app.get('/api/escrow/history', (req, res) => {
-  res.json(escrowTransactions);
+app.get('/api/escrow/history', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  // Administrators may view the complete escrow history
+  if (authUser.role === 'admin') {
+    return res.json(escrowTransactions);
+  }
+
+  // Build a list of escrow accounts the user participates in
+  const accessibleEscrows = escrowAccounts.filter(
+    e =>
+      e.customer_id === authUser.id ||
+      e.fundi_id === authUser.id
+  );
+
+  // Extract the corresponding job IDs
+  const accessibleJobIds = accessibleEscrows.map(e => e.job_id);
+
+  // Return only transactions belonging to those jobs
+  const visibleTransactions = escrowTransactions.filter(
+    tx => accessibleJobIds.includes(tx.job_id)
+  );
+
+  res.json(visibleTransactions);
 });
 
 // CHATS: Send text message

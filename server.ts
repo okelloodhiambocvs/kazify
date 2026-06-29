@@ -4721,12 +4721,38 @@ app.post('/api/escrow/:jobId/milestones', authenticateToken, (req, res) => {
 });
 
 // 4. Get Milestones for a Job
-app.get('/api/escrow/:jobId/milestones', (req, res) => {
-  const escrow = escrowAccounts.find(e => e.job_id === req.params.jobId);
+app.get('/api/escrow/:jobId/milestones', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  const escrow = escrowAccounts.find(
+    e => e.job_id === req.params.jobId
+  );
+
   if (!escrow) {
     return res.json([]);
   }
-  const milestones = escrowMilestones.filter(m => m.escrow_account_id === escrow.id);
+
+  const authorized =
+    authUser.role === 'admin' ||
+    escrow.customer_id === authUser.id ||
+    escrow.fundi_id === authUser.id;
+
+  if (!authorized) {
+    return res.status(403).json({
+      error: 'You are not authorized to view these milestones.'
+    });
+  }
+
+  const milestones = escrowMilestones.filter(
+    m => m.escrow_account_id === escrow.id
+  );
+
   res.json(milestones);
 });
 

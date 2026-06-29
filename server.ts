@@ -4815,45 +4815,147 @@ app.post(
 );
 
 // 6. Partial Escrow Release
-app.post('/api/escrow/accounts/:escrowAccountId/release-partial', authenticateToken, (req, res) => {
-  const escrowAccountId = req.params.escrowAccountId;
-  const { amount, description } = req.body;
+app.post(
+  '/api/escrow/accounts/:escrowAccountId/release-partial',
+  authenticateToken,
+  (req, res) => {
+    const escrowAccountId = req.params.escrowAccountId;
+    const { amount, description } = req.body;
 
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: 'Invalid partial amount to release.' });
-  }
+    const authUser = (req as AuthenticatedRequest).user;
 
-  try {
-    const settlement = EscrowEngine.releasePartialEscrow(escrowAccountId, amount, description || 'Partial payment release');
-
-    // Track matching in-memory wallet of Admin for commission syncing
-    let adminWallet = wallets.find(w => w.user_id === 'admin-user-id-001' || w.user_id === 'admin');
-    if (adminWallet) {
-      adminWallet.balance += settlement.platform_fee;
-      adminWallet.updated_at = new Date().toISOString();
+    if (!authUser) {
+      return res.status(401).json({
+        error: 'Authentication required.'
+      });
     }
 
-    const escAcc = escrowAccounts.find(ea => ea.id === escrowAccountId);
-    if (escAcc) {
-      const job = jobs.find(j => j.id === escAcc.job_id);
-      if (job) {
-        if (escAcc.status === 'released') {
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({
+        error: 'Invalid partial amount to release.'
+      });
+    }
+
+    const escAcc = escrowAccounts.find(
+      ea => ea.id === escrowAccountId
+    );
+
+    if (!escAcc) {
+      return res.status(404).json({
+        error: 'Escrow account not found.'
+      });
+    }
+
+    const authorized =
+      authUser.role === 'admin' ||
+      authUser.id === escAcc.customer_id;
+
+    if (!authorized) {
+      return res.status(403).json({
+        error: 'You are not authorized to release escrow funds.'
+      });
+    }
+
+    if (escAcc.status !== 'held') {
+      return res.status(400).json({
+        error: `Escrow cannot be released while its status is "${escAcc.status}".`
+      });
+    }
+
+    const job = jobs.find(j => j.id === escAcc.job_id);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Associated job not found.'
+      });
+    }
+
+    const statusBefore = escAcc.status;
+
+    try {
+      const settlement = EscrowEngine.releasePartialEscrow(
+        escrowAccountId,
+        Number(amount),
+        description || 'Partial payment release'
+      );
+
+      // Synchronize platform commission wallet
+      const adminWallet = wallets.find(
+        w =>
+          w.user_id === 'admin-user-id-001' ||
+          w.user_id === 'admin'
+      );
+
+      if (adminWallet) {
+        adminWallet.balance += settlement.platform_fee;
+        adminWallet.updated_at = new Date().toISOString();
+      }
+
+      // Refresh escrow after engine updates
+      const updatedEscrow = escrowAccounts.find(
+        ea => ea.id === escrowAccountId
+      );
+
+      if (updatedEscrow) {
+        if (updatedEscrow.status === 'released') {
           job.escrow_status = 'released';
           job.status = 'completed';
         }
-        createNotification(escAcc.customer_id, "Partial Payment Released", `Partial payment of KES ${amount} has been released to the tradesperson.`);
-        createNotification(escAcc.fundi_id!, "Partial Payout Received! 💰", `KES ${settlement.amount_net} has been dispatched to you.`);
 
-        sendWSMessage(escAcc.customer_id, { type: 'escrow_partial_released', job, amount });
-        sendWSMessage(escAcc.fundi_id!, { type: 'escrow_partial_released', job, amount });
+        // Immutable audit trail
+        recordSensitiveStateChange(
+          authUser.id,
+          authUser.name,
+          'PAYMENT_STATE_CHANGE',
+          'payment',
+          escrowAccountId,
+          statusBefore,
+          updatedEscrow.status,
+          `Released partial escrow payment of KES ${Number(amount).toLocaleString()} for job "${job.title}". Net payout: KES ${settlement.amount_net}. Platform fee: KES ${settlement.platform_fee}.`,
+          req.ip,
+          req.headers['user-agent'] as string
+        );
+
+        createNotification(
+          updatedEscrow.customer_id,
+          'Partial Payment Released',
+          `Partial payment of KES ${Number(amount).toLocaleString()} has been released to the tradesperson.`
+        );
+
+        if (updatedEscrow.fundi_id) {
+          createNotification(
+            updatedEscrow.fundi_id,
+            'Partial Payout Received! 💰',
+            `KES ${settlement.amount_net.toLocaleString()} has been dispatched to you.`
+          );
+        }
+
+        sendWSMessage(updatedEscrow.customer_id, {
+          type: 'escrow_partial_released',
+          job,
+          amount: Number(amount)
+        });
+
+        if (updatedEscrow.fundi_id) {
+          sendWSMessage(updatedEscrow.fundi_id, {
+            type: 'escrow_partial_released',
+            job,
+            amount: Number(amount)
+          });
+        }
       }
-    }
 
-    res.json({ success: true, settlement });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+      res.json({
+        success: true,
+        settlement
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        error: err.message
+      });
+    }
   }
-});
+);
 
 // 7. Resolve Dispute with Arbitrary Split (Admin Arbitration)
 app.post('/api/disputes/:id/resolve-arbitrated', authenticateToken, requireAdmin, (req, res) => {

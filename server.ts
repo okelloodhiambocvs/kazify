@@ -3673,16 +3673,37 @@ app.post('/api/admin/kyc/:id/review', authenticateToken, requireAdmin, (req, res
   res.json({ success: true, document: doc });
 });
 
+// Get contract for a specific job
+app.get(
+  '/api/contracts/job/:job_id',
+  authenticateToken,
+  (req, res) => {
+    const authUser = (req as AuthenticatedRequest).user;
+    const jobId = req.params.job_id;
 
-// --- CONTRACT SYSTEM ENDPOINTS ---
+    const contract = contracts.find(c => c.job_id === jobId);
 
-// Get contracts for a specific job
-app.get('/api/contracts/job/:job_id', (req, res) => {
-  const jobId = req.params.job_id;
-  const contract = contracts.find(c => c.job_id === jobId);
-  if (!contract) return res.status(404).json({ error: 'No contract found for this job' });
-  res.json(contract);
-});
+    if (!contract) {
+      return res.status(404).json({
+        error: 'No contract found for this job'
+      });
+    }
+
+    // Only participants or administrators may access the contract
+    const authorized =
+      authUser.role === 'admin' ||
+      contract.customer_id === authUser.id ||
+      contract.fundi_id === authUser.id;
+
+    if (!authorized) {
+      return res.status(403).json({
+        error: 'You are not authorized to view this contract.'
+      });
+    }
+
+    res.json(contract);
+  }
+);
 
 // Get all contracts for a user
 app.get('/api/contracts/user/:user_id', (req, res) => {

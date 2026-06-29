@@ -3941,13 +3941,42 @@ app.post('/api/disputes/raise', authenticateToken, (req, res) => {
 });
 
 // Get dispute for a job
-app.get('/api/disputes/job/:job_id', (req, res) => {
-  const jobId = req.params.job_id;
-  const dispute = disputes.find(d => d.job_id === jobId);
-  if (!dispute) return res.status(404).json({ error: 'No dispute active on this job' });
-  res.json(dispute);
-});
+app.get(
+  '/api/disputes/job/:job_id',
+  authenticateToken,
+  (req, res) => {
+    const jobId = req.params.job_id;
+    const user = (req as AuthenticatedRequest).user;
 
+    const job = jobs.find(j => j.id === jobId);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found'
+      });
+    }
+
+    const isParticipant =
+      job.customer_id === user.id ||
+      job.fundi_id === user.id;
+
+    if (!isParticipant && user.role !== 'admin') {
+      return res.status(403).json({
+        error: 'You are not authorized to view this dispute.'
+      });
+    }
+
+    const dispute = disputes.find(d => d.job_id === jobId);
+
+    if (!dispute) {
+      return res.status(404).json({
+        error: 'No dispute active on this job'
+      });
+    }
+
+    res.json(dispute);
+  }
+);
 // Get all disputes (Admin Only)
 app.get(
   '/api/disputes',

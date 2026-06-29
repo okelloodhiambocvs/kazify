@@ -1619,6 +1619,36 @@ app.post('/api/reviews', authenticateToken, (req, res) => {
     });
   }
 
+  // Ensure the reviewed job exists
+  const job = jobs.find(j => j.id === job_id);
+
+  if (!job) {
+    return res.status(404).json({
+      error: 'Job not found.'
+    });
+  }
+
+  // Ensure the authenticated customer owns the job
+  if (job.customer_id !== authUser.id) {
+    return res.status(403).json({
+      error: 'You can only review your own completed jobs.'
+    });
+  }
+
+  // Ensure the review is for the assigned fundi
+  if (job.fundi_id !== fundi_id) {
+    return res.status(400).json({
+      error: 'Review fundi does not match the assigned fundi.'
+    });
+  }
+
+  // Ensure the job has been completed
+  if (job.status !== 'completed') {
+    return res.status(400).json({
+      error: 'Reviews can only be submitted after job completion.'
+    });
+  }
+
   const newReview: LocalReview = {
     id: `rev_${Date.now()}`,
     job_id,

@@ -4471,14 +4471,17 @@ app.post('/api/admin/users/:id/role', authenticateToken, requireAdmin, (req, res
 app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin, (req, res) => {
   const admin = (req as AuthenticatedRequest).user;
   const targetId = req.params.id;
-  const { amount, action, reason } = req.body; // action: 'credit' or 'debit'
+  const { amount, action, reason } = req.body;
 
   const targetUser = users.find(u => u.id === targetId);
   if (!targetUser) {
-    return res.status(404).json({ error: 'User not found' });
+    return res.status(404).json({
+      error: 'User not found'
+    });
   }
 
   let wallet = wallets.find(w => w.user_id === targetId);
+
   if (!wallet) {
     wallet = {
       id: `w_${targetId}`,
@@ -4487,18 +4490,40 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
       currency: 'KES',
       updated_at: new Date().toISOString()
     };
+
     wallets.push(wallet);
   }
 
   const numAmount = parseFloat(amount);
+
   if (isNaN(numAmount) || numAmount <= 0) {
-    return res.status(400).json({ error: 'Invalid amount value. Must be positive number.' });
+    return res.status(400).json({
+      error: 'Invalid amount value. Must be positive number.'
+    });
+  }
+
+  // Validate action
+  const normalizedAction = String(action).trim().toLowerCase();
+
+  if (!['credit', 'debit'].includes(normalizedAction)) {
+    return res.status(400).json({
+      error: "Action must be either 'credit' or 'debit'."
+    });
+  }
+
+  // Require meaningful audit reason
+  const auditReason = String(reason ?? '').trim();
+
+  if (auditReason.length < 10) {
+    return res.status(400).json({
+      error: 'Please provide a meaningful reason (minimum 10 characters) for the wallet override.'
+    });
   }
 
   const oldBalance = wallet.balance;
 
   try {
-    if (action === 'credit') {
+    if (normalizedAction === 'credit') {
       EscrowEngine.recordLedgerTransaction([
         {
           ledger_group_id: '',
@@ -4506,7 +4531,7 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
           amount: numAmount,
           direction: 'debit',
           ledger_account: 'platform_earnings',
-          description: `Admin manual wallet override credit adjustment: ${reason || 'Adjustment'}`,
+          description: `Admin manual wallet override credit adjustment: ${auditReason}`,
           reference_id: `override_${targetId}`
         },
         {
@@ -4515,7 +4540,7 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
           amount: numAmount,
           direction: 'credit',
           ledger_account: 'user_wallet',
-          description: `Admin manual wallet override credit adjustment: ${reason || 'Adjustment'}`,
+          description: `Admin manual wallet override credit adjustment: ${auditReason}`,
           reference_id: `override_${targetId}`
         }
       ]);
@@ -4523,7 +4548,9 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
       wallet.balance += numAmount;
     } else {
       if (wallet.balance < numAmount) {
-        return res.status(400).json({ error: `Cannot debit KES ${numAmount} from balance of KES ${wallet.balance}.` });
+        return res.status(400).json({
+          error: `Cannot debit KES ${numAmount} from balance of KES ${wallet.balance}.`
+        });
       }
 
       EscrowEngine.recordLedgerTransaction([
@@ -4533,7 +4560,7 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
           amount: numAmount,
           direction: 'debit',
           ledger_account: 'user_wallet',
-          description: `Admin manual wallet override debit adjustment: ${reason || 'Adjustment'}`,
+          description: `Admin manual wallet override debit adjustment: ${auditReason}`,
           reference_id: `override_${targetId}`
         },
         {
@@ -4542,7 +4569,7 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
           amount: numAmount,
           direction: 'credit',
           ledger_account: 'platform_earnings',
-          description: `Admin manual wallet override debit adjustment: ${reason || 'Adjustment'}`,
+          description: `Admin manual wallet override debit adjustment: ${auditReason}`,
           reference_id: `override_${targetId}`
         }
       ]);
@@ -4556,34 +4583,41 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
       id: `wtx_${Date.now()}`,
       wallet_id: wallet.id,
       user_id: targetId,
-      amount: numAmount,
-      type: action === 'credit' ? 'deposit' : 'withdrawal',
-      description: `Admin manual wallet override adjustment: ${reason || 'Adjustment'}`,
+      amount: normalizedAction === 'credit' ? numAmount : -numAmount,
+      type: normalizedAction === 'credit' ? 'deposit' : 'withdrawal',
+      description: `Admin manual wallet override adjustment: ${auditReason}`,
       reference_id: `override_${targetId}`,
       created_at: new Date().toISOString()
     };
+
     walletTransactions.unshift(tx);
 
     recordAdminAudit(
       admin.id,
       admin.name,
-      `WALLET_OVERRIDE`,
+      'WALLET_OVERRIDE',
       'wallet',
       targetId,
-      `Manual balance adjustment for ${targetUser.name}: ${action.toUpperCase()} KES ${numAmount}. New balance KES ${wallet.balance}. Reason: ${reason || 'Not specified'}.`,
+      `Manual balance adjustment for ${targetUser.name}: ${normalizedAction.toUpperCase()} KES ${numAmount}. New balance KES ${wallet.balance}. Reason: ${auditReason}.`,
       req.ip,
       req.headers['user-agent']
     );
 
     createNotification(
       targetId,
-      `Wallet Adjusted KES ${action === 'credit' ? '+' : '-'}${numAmount.toLocaleString()} 💳`,
-      `An administrator has adjusted your wallet balance. Old: KES ${oldBalance.toLocaleString()}, New: KES ${wallet.balance.toLocaleString()}. ${reason ? 'Note: ' + reason : ''}`
+      `Wallet Adjusted KES ${normalizedAction === 'credit' ? '+' : '-'}${numAmount.toLocaleString()} 💳`,
+      `An administrator has adjusted your wallet balance. Old: KES ${oldBalance.toLocaleString()}, New: KES ${wallet.balance.toLocaleString()}. Note: ${auditReason}`
     );
 
-    res.json({ success: true, balance: wallet.balance });
+    res.json({
+      success: true,
+      balance: wallet.balance
+    });
+
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message
+    });
   }
 });
 

@@ -1649,6 +1649,19 @@ app.post('/api/reviews', authenticateToken, (req, res) => {
     });
   }
 
+  // Prevent duplicate reviews for the same completed job
+  const existingReview = reviews.find(
+    r =>
+      r.job_id === job_id &&
+      r.customer_id === authUser.id
+  );
+
+  if (existingReview) {
+    return res.status(409).json({
+      error: 'A review has already been submitted for this job.'
+    });
+  }
+
   const newReview: LocalReview = {
     id: `rev_${Date.now()}`,
     job_id,

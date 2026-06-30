@@ -230,7 +230,16 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({
+  limit: '100kb',
+  strict: true,
+  type: 'application/json'
+}));
+
+app.use(express.urlencoded({
+  extended: false,
+  limit: '100kb'
+}));
 
 // Apply global rate limiting to all API endpoints
 app.use('/api', apiRateLimiter);

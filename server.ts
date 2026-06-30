@@ -29,6 +29,10 @@ dotenv.config();
 const JWT_SECRET = process.env.JWT_SECRET!;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
 
+// JWT Security Constants
+const JWT_ISSUER = 'kazify';
+const JWT_AUDIENCE = 'kazify-users';
+
 // In-memory registry for valid refresh tokens to allow secure revoking
 const refreshTokensRegistry = new Set<string>();
 
@@ -42,63 +46,125 @@ interface AuthenticatedRequest extends express.Request {
 }
 
 // Helpers for JWT Token generation
-function generateAccessToken(userPayload: { id: string; email: string; role: string; name: string }) {
-  return jwt.sign(userPayload, JWT_SECRET, { expiresIn: '15m' });
+function generateAccessToken(userPayload: {
+  id: string;
+  email: string;
+  role: string;
+  name: string;
+}) {
+  return jwt.sign(userPayload, JWT_SECRET, {
+    expiresIn: '15m',
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    algorithm: 'HS256'
+  });
 }
 
 function generateRefreshToken(userPayload: { id: string }) {
-  const token = jwt.sign(userPayload, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign(userPayload, JWT_REFRESH_SECRET, {
+    expiresIn: '7d',
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    algorithm: 'HS256'
+  });
+
   refreshTokensRegistry.add(token);
   return token;
 }
 
 // Security Middleware: Authenticate JWT Access Token
-function authenticateToken(req: express.Request, res: express.Response, next: express.NextFunction) {
+function authenticateToken(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ error: 'Access token is missing or unauthorized' });
+    return res.status(401).json({
+      error: 'Access token is missing or unauthorized'
+    });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).json({ error: 'Invalid or expired access token' });
+  jwt.verify(
+    token,
+    JWT_SECRET,
+    {
+      algorithms: ['HS256'],
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE
+    },
+    (err, decoded) => {
+      if (err) {
+        return res.status(401).json({
+          error: 'Invalid or expired access token'
+        });
+      }
+
+      const decodedUser = decoded as any;
+      const matchedUser = users.find(u => u.id === decodedUser.id);
+
+      if (matchedUser && matchedUser.status === 'banned') {
+        return res.status(403).json({
+          error: 'Your account has been banned due to security violations.'
+        });
+      }
+
+      (req as AuthenticatedRequest).user = decodedUser;
+      next();
     }
-    const decodedUser = decoded as any;
-    const matchedUser = users.find(u => u.id === decodedUser.id);
-    if (matchedUser && matchedUser.status === 'banned') {
-      return res.status(403).json({ error: 'Your account has been banned due to security violations.' });
-    }
-    (req as AuthenticatedRequest).user = decodedUser;
-    next();
-  });
+  );
 }
 
 // Security Middleware: Require Customer Role
-function requireCustomer(req: express.Request, res: express.Response, next: express.NextFunction) {
+function requireCustomer(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
   const user = (req as AuthenticatedRequest).user;
+
   if (!user || user.role !== 'customer') {
-    return res.status(403).json({ error: 'Access denied: Customer role privileges required' });
+    return res.status(403).json({
+      error: 'Access denied: Customer role privileges required'
+    });
   }
+
   next();
 }
 
 // Security Middleware: Require Fundi Role
-function requireFundi(req: express.Request, res: express.Response, next: express.NextFunction) {
+function requireFundi(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
   const user = (req as AuthenticatedRequest).user;
+
   if (!user || user.role !== 'fundi') {
-    return res.status(403).json({ error: 'Access denied: Fundi role privileges required' });
+    return res.status(403).json({
+      error: 'Access denied: Fundi role privileges required'
+    });
   }
+
   next();
 }
 
 // Security Middleware: Require Admin Role
-function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+function requireAdmin(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
   const user = (req as AuthenticatedRequest).user;
+
   if (!user || user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied: Admin role privileges required' });
+    return res.status(403).json({
+      error: 'Access denied: Admin role privileges required'
+    });
   }
+
   next();
 }
 
@@ -1338,38 +1404,56 @@ app.post('/api/auth/refresh', (req, res) => {
   const { refreshToken } = req.body;
 
   if (!refreshToken) {
-    return res.status(401).json({ error: 'Refresh token is missing' });
+    return res.status(401).json({
+      error: 'Refresh token is missing'
+    });
   }
 
-  jwt.verify(refreshToken, JWT_REFRESH_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).json({ error: 'Invalid or expired refresh token' });
-    }
+  jwt.verify(
+    refreshToken,
+    JWT_REFRESH_SECRET,
+    {
+      algorithms: ['HS256'],
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE
+    },
+    (err, decoded) => {
+      if (err) {
+        return res.status(401).json({
+          error: 'Invalid or expired refresh token'
+        });
+      }
 
-    const payload = decoded as { id: string };
-    const user = users.find(u => u.id === payload.id);
+      const payload = decoded as { id: string };
+      const user = users.find(u => u.id === payload.id);
 
-    if (!user) {
-      return res.status(401).json({ error: 'Associated user not found' });
-    }
+      if (!user) {
+        return res.status(401).json({
+          error: 'Associated user not found'
+        });
+      }
 
-    // Auto-heal the registry in case of server restart or container scale-to-zero
-    if (!refreshTokensRegistry.has(refreshToken)) {
-      return res.status(401).json({
-        error: 'Refresh token has been revoked or is no longer valid.'
+      // Ensure the refresh token is still active
+      if (!refreshTokensRegistry.has(refreshToken)) {
+        return res.status(401).json({
+          error: 'Refresh token has been revoked or is no longer valid.'
+        });
+      }
+
+      const userPayload = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name
+      };
+
+      const newAccessToken = generateAccessToken(userPayload);
+
+      return res.json({
+        token: newAccessToken
       });
     }
-
-    const userPayload = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name
-    };
-
-    const newAccessToken = generateAccessToken(userPayload);
-    res.json({ token: newAccessToken });
-  });
+  );
 });
 
 // AUTH: Logout/Revoke Refresh Token

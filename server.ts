@@ -1141,10 +1141,77 @@ wss.on('connection', (ws: WebSocket & { userId?: string }, request) => {
   ws.on('message', (messageRaw) => {
     try {
       const data = JSON.parse(messageRaw.toString());
+
       if (data.type === 'auth_register') {
-        ws.userId = data.user_id;
-        connections.set(data.user_id, ws);
-        console.log(`WS registered user ID: ${data.user_id}`);
+        if (typeof data.token !== 'string') {
+          ws.send(
+            JSON.stringify({
+              type: 'auth_error',
+              message: 'Authentication token is required.'
+            })
+          );
+          ws.close();
+          return;
+        }
+
+        try {
+          const decoded = jwt.verify(data.token, JWT_SECRET, {
+            algorithms: ['HS256'],
+            issuer: process.env.JWT_ISSUER,
+            audience: process.env.JWT_AUDIENCE,
+          }) as {
+            id: string;
+            email: string;
+            role: 'customer' | 'fundi' | 'admin';
+            name: string;
+          };
+
+          const user = users.find(u => u.id === decoded.id);
+
+          if (!user) {
+            ws.send(
+              JSON.stringify({
+                type: 'auth_error',
+                message: 'User not found.'
+              })
+            );
+            ws.close();
+            return;
+          }
+
+          if (user.status === 'banned') {
+            ws.send(
+              JSON.stringify({
+                type: 'auth_error',
+                message: 'Account has been banned.'
+              })
+            );
+            ws.close();
+            return;
+          }
+
+          ws.userId = user.id;
+          connections.set(user.id, ws);
+
+          console.log(`WS authenticated user ID: ${user.id}`);
+
+          ws.send(
+            JSON.stringify({
+              type: 'auth_success'
+            })
+          );
+        } catch (err) {
+          console.error('WS authentication failed:', err);
+
+          ws.send(
+            JSON.stringify({
+              type: 'auth_error',
+              message: 'Invalid or expired authentication token.'
+            })
+          );
+
+          ws.close();
+        }
       }
     } catch (e) {
       console.error('WS message parsing failure:', e);

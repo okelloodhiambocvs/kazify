@@ -5685,110 +5685,152 @@ app.get('/api/admin/fraud/detections', authenticateToken, requireAdmin, (req, re
 
 // 6. Platform Time-Series Analytics
 app.get('/api/admin/analytics', authenticateToken, requireAdmin, (req, res) => {
-  const days = ['Day -6', 'Day -5', 'Day -4', 'Day -3', 'Day -2', 'Day -1', 'Today'];
-  const dailyEscrowVolume = [12000, 18500, 15000, 32000, 24000, 41000, escrowTransactions.reduce((s, t) => s + t.amount, 0)];
-  const dailyEarnings = dailyEscrowVolume.map(v => Math.round(v * 0.10));
-  const dailyUserRegistrations = [2, 4, 1, 5, 3, 2, users.length - 12 > 0 ? users.length - 12 : 0];
+  try {
+    const days = ['Day -6', 'Day -5', 'Day -4', 'Day -3', 'Day -2', 'Day -1', 'Today'];
 
-  const categoryCounts: { [cat: string]: number } = {};
-  jobs.forEach(j => {
-    categoryCounts[j.category] = (categoryCounts[j.category] || 0) + 1;
-  });
+    // Only completed escrow transactions contribute to revenue metrics
+    const completedEscrowVolume = escrowTransactions
+      .filter(tx => tx.status === 'completed')
+      .reduce((sum, tx) => sum + tx.amount, 0);
 
-  const categoryBreakdown = Object.keys(categoryCounts).map(cat => ({
-    category: cat,
-    jobsCount: categoryCounts[cat],
-    volume: jobs.filter(j => j.category === cat).reduce((s, j) => s + j.amount, 0)
-  }));
-
-  // Helper for County Identification supporting all 47 counties in Kenya
-  const getCountyFromAddress = (address?: string): string => {
-    if (!address) return 'Nairobi County';
-    const lower = address.toLowerCase();
-
-    const counties = [
-      'Mombasa', 'Kwale', 'Kilifi', 'Tana River', 'Lamu', 'Taita Taveta',
-      'Garissa', 'Wajir', 'Mandera', 'Marsabit', 'Isiolo', 'Meru',
-      'Tharaka Nithi', 'Embu', 'Kitui', 'Machakos', 'Makueni', 'Nyandarua',
-      'Nyeri', 'Kirinyaga', 'Murang\'a', 'Kiambu', 'Turkana', 'West Pokot',
-      'Samburu', 'Trans Nzoia', 'Uasin Gishu', 'Elgeyo Marakwet', 'Nandi',
-      'Baringo', 'Laikipia', 'Nakuru', 'Narok', 'Kajiado', 'Kericho',
-      'Bomet', 'Kakamega', 'Vihiga', 'Bungoma', 'Busia', 'Siaya',
-      'Kisumu', 'Homa Bay', 'Migori', 'Kisii', 'Nyamira', 'Nairobi'
+    const dailyEscrowVolume = [
+      12000,
+      18500,
+      15000,
+      32000,
+      24000,
+      41000,
+      completedEscrowVolume
     ];
 
-    for (const county of counties) {
-      if (lower.includes(county.toLowerCase())) {
-        return `${county} County`;
+    const dailyEarnings = dailyEscrowVolume.map(v => Math.round(v * 0.10));
+
+    const dailyUserRegistrations = [
+      2,
+      4,
+      1,
+      5,
+      3,
+      2,
+      Math.max(users.length - 12, 0)
+    ];
+
+    const categoryCounts: Record<string, number> = {};
+
+    jobs.forEach(j => {
+      categoryCounts[j.category] = (categoryCounts[j.category] || 0) + 1;
+    });
+
+    const categoryBreakdown = Object.keys(categoryCounts).map(category => ({
+      category,
+      jobsCount: categoryCounts[category],
+      volume: jobs
+        .filter(j => j.category === category)
+        .reduce((sum, j) => sum + j.amount, 0)
+    }));
+
+    // Helper for County Identification supporting all 47 counties
+    const getCountyFromAddress = (address?: string): string => {
+      if (!address) return 'Nairobi County';
+
+      const lower = address.toLowerCase();
+
+      const counties = [
+        'Mombasa', 'Kwale', 'Kilifi', 'Tana River', 'Lamu', 'Taita Taveta',
+        'Garissa', 'Wajir', 'Mandera', 'Marsabit', 'Isiolo', 'Meru',
+        'Tharaka Nithi', 'Embu', 'Kitui', 'Machakos', 'Makueni', 'Nyandarua',
+        'Nyeri', 'Kirinyaga', "Murang'a", 'Kiambu', 'Turkana', 'West Pokot',
+        'Samburu', 'Trans Nzoia', 'Uasin Gishu', 'Elgeyo Marakwet', 'Nandi',
+        'Baringo', 'Laikipia', 'Nakuru', 'Narok', 'Kajiado', 'Kericho',
+        'Bomet', 'Kakamega', 'Vihiga', 'Bungoma', 'Busia', 'Siaya',
+        'Kisumu', 'Homa Bay', 'Migori', 'Kisii', 'Nyamira', 'Nairobi'
+      ];
+
+      for (const county of counties) {
+        if (lower.includes(county.toLowerCase())) {
+          return `${county} County`;
+        }
       }
-    }
 
-    // Popular towns or region alias mapping for high fidelity
-    if (lower.includes('eldoret')) return 'Uasin Gishu County';
-    if (lower.includes('diani')) return 'Kwale County';
-    if (lower.includes('malindi')) return 'Kilifi County';
-    if (lower.includes('thika') || lower.includes('ruiru') || lower.includes('githurai')) return 'Kiambu County';
-    if (lower.includes('naivasha')) return 'Nakuru County';
-    if (lower.includes('kitengela') || lower.includes('rongai') || lower.includes('ngong')) return 'Kajiado County';
-    if (lower.includes('syokimau') || lower.includes('athi river') || lower.includes('athiriver')) return 'Machakos County';
-    if (lower.includes('kakamega')) return 'Kakamega County';
-    if (lower.includes('kisumu')) return 'Kisumu County';
-    if (lower.includes('mombasa')) return 'Mombasa County';
+      if (lower.includes('eldoret')) return 'Uasin Gishu County';
+      if (lower.includes('diani')) return 'Kwale County';
+      if (lower.includes('malindi')) return 'Kilifi County';
+      if (lower.includes('thika') || lower.includes('ruiru') || lower.includes('githurai')) return 'Kiambu County';
+      if (lower.includes('naivasha')) return 'Nakuru County';
+      if (lower.includes('kitengela') || lower.includes('rongai') || lower.includes('ngong')) return 'Kajiado County';
+      if (lower.includes('syokimau') || lower.includes('athi river') || lower.includes('athiriver')) return 'Machakos County';
+      if (lower.includes('kakamega')) return 'Kakamega County';
+      if (lower.includes('kisumu')) return 'Kisumu County';
+      if (lower.includes('mombasa')) return 'Mombasa County';
 
-    return 'Nairobi County'; // Default fallback
-  };
+      return 'Nairobi County';
+    };
 
-  // Active contracts and user growth statistics by Kenyan Counties (National Operational Support)
-  const countyJobs: { [county: string]: number } = {};
-  jobs.forEach(j => {
-    const county = getCountyFromAddress(j.address);
-    countyJobs[county] = (countyJobs[county] || 0) + 1;
-  });
+    const countyJobs: Record<string, number> = {};
 
-  const countyUsers: { [county: string]: number } = {};
-  users.forEach(u => {
-    const county = getCountyFromAddress(u.location?.address);
-    countyUsers[county] = (countyUsers[county] || 0) + 1;
-  });
+    jobs.forEach(job => {
+      const county = getCountyFromAddress(job.address);
+      countyJobs[county] = (countyJobs[county] || 0) + 1;
+    });
 
-  const countyJobsBreakdown = Object.keys(countyJobs).map(county => ({
-    county,
-    jobsCount: countyJobs[county]
-  }));
+    const countyUsers: Record<string, number> = {};
 
-  const countyUsersBreakdown = Object.keys(countyUsers).map(county => ({
-    county,
-    count: countyUsers[county]
-  }));
+    users.forEach(user => {
+      const county = getCountyFromAddress(user.location?.address);
+      countyUsers[county] = (countyUsers[county] || 0) + 1;
+    });
 
-  res.json({
-    timeSeries: days.map((day, idx) => ({
-      name: day,
-      escrowVolume: dailyEscrowVolume[idx],
-      platformEarnings: dailyEarnings[idx],
-      signups: dailyUserRegistrations[idx]
-    })),
-    categoryBreakdown,
-    countyJobsBreakdown,
-    countyUsersBreakdown,
-    rolesSplit: {
-      customers: users.filter(u => u.role === 'customer').length,
-      fundis: users.filter(u => u.role === 'fundi').length,
-      admins: users.filter(u => u.role === 'admin').length
-    },
-    systemMetrics: {
-      totalJobs: jobs.length,
-      completedJobs: jobs.filter(j => j.status === 'completed').length,
-      cancelledJobs: jobs.filter(j => j.status === 'cancelled').length,
-      activeJobs: jobs.filter(j => j.status !== 'completed' && j.status !== 'cancelled').length,
-      disputeCount: disputes.length,
-      activeDisputes: disputes.filter(d => d.status === 'pending').length,
-      kycCount: kycDocuments.length,
-      pendingKyc: kycDocuments.filter(d => d.status === 'pending').length
-    }
-  });
+    const countyJobsBreakdown = Object.entries(countyJobs).map(([county, jobsCount]) => ({
+      county,
+      jobsCount
+    }));
+
+    const countyUsersBreakdown = Object.entries(countyUsers).map(([county, count]) => ({
+      county,
+      count
+    }));
+
+    res.json({
+      generated_at: new Date().toISOString(),
+
+      timeSeries: days.map((day, idx) => ({
+        name: day,
+        escrowVolume: dailyEscrowVolume[idx],
+        platformEarnings: dailyEarnings[idx],
+        signups: dailyUserRegistrations[idx]
+      })),
+
+      categoryBreakdown,
+      countyJobsBreakdown,
+      countyUsersBreakdown,
+
+      rolesSplit: {
+        customers: users.filter(u => u.role === 'customer').length,
+        fundis: users.filter(u => u.role === 'fundi').length,
+        admins: users.filter(u => u.role === 'admin').length
+      },
+
+      systemMetrics: {
+        totalJobs: jobs.length,
+        completedJobs: jobs.filter(j => j.status === 'completed').length,
+        cancelledJobs: jobs.filter(j => j.status === 'cancelled').length,
+        activeJobs: jobs.filter(j =>
+          j.status !== 'completed' &&
+          j.status !== 'cancelled'
+        ).length,
+        disputeCount: disputes.length,
+        activeDisputes: disputes.filter(d => d.status === 'pending').length,
+        kycCount: kycDocuments.length,
+        pendingKyc: kycDocuments.filter(d => d.status === 'pending').length
+      }
+    });
+
+  } catch (err: any) {
+    return res.status(500).json({
+      error: err.message || 'Failed to generate analytics.'
+    });
+  }
 });
-
 
 // --- VITE DEV MIDDLEWARE & PRODUCTION STATIC SERVING ---
 

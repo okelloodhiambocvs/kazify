@@ -6274,6 +6274,7 @@ async function startServer() {
 
   server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+
     if (pathname === '/ws') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
@@ -6286,6 +6287,48 @@ async function startServer() {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server launched on port ${PORT}`);
   });
+
+  // ------------------------------------------------------------------
+  // Graceful shutdown
+  // ------------------------------------------------------------------
+
+  let shuttingDown = false;
+
+  const shutdown = (signal: string) => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+
+    console.log(`[SERVER] ${signal} received. Shutting down gracefully...`);
+
+    // Stop accepting new WebSocket connections
+    wss.close();
+
+    // Close existing HTTP server
+    server.close((err) => {
+      if (err) {
+        console.error('[SERVER] Error while closing server:', err);
+        process.exit(1);
+      }
+
+      console.log('[SERVER] HTTP server closed.');
+      process.exit(0);
+    });
+
+    // Force exit if shutdown hangs
+    const forceShutdownTimer = setTimeout(() => {
+      console.error('[SERVER] Forced shutdown after 10 seconds.');
+      process.exit(1);
+    }, 10_000);
+
+    // Do not keep the event loop alive because of the timer
+    forceShutdownTimer.unref();
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 startServer();

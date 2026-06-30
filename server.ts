@@ -26,7 +26,11 @@ import {
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'kazify_super_secure_jwt_secret_99881122';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET){
+  throw new Error("Application startup failed: JWT_SECRET environment variable is required.");
+}
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'kazify_super_secure_refresh_token_secret_55443322';
 
 // In-memory registry for valid refresh tokens to allow secure revoking

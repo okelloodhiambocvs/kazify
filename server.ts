@@ -238,6 +238,12 @@ app.use('/api', apiRateLimiter);
 // Apply stricter rate limiting on sensitive authentication routes
 app.use('/api/auth/login', authRateLimiter);
 app.use('/api/auth/register', authRateLimiter);
+app.use('/api/auth/refresh', authRateLimiter);
+app.use('/api/auth/logout', authRateLimiter);
+app.use('/api/auth/password-reset-request', authRateLimiter);
+app.use('/api/auth/password-reset', authRateLimiter);
+app.use('/api/auth/verify-email-request', authRateLimiter);
+app.use('/api/auth/verify-email', authRateLimiter);
 
 // Apply double-submit CSRF protection
 app.use(csrfProtection);

@@ -448,6 +448,7 @@ export class NotificationEngineService {
   // Retrieve user preferences (guarantee default schema if none exist)
   static getPreferences(userId: string): NotificationPreferences {
     let pref = notificationPreferences.find(p => p.user_id === userId);
+
     if (!pref) {
       pref = {
         id: `pref_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -459,26 +460,60 @@ export class NotificationEngineService {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
+
       notificationPreferences.push(pref);
     }
+
     return pref;
   }
 
   // Update user preferences
-  static updatePreferences(userId: string, payload: Partial<NotificationPreferences>): NotificationPreferences {
+  static updatePreferences(
+    userId: string,
+    payload: Partial<NotificationPreferences>
+  ): NotificationPreferences {
     const pref = this.getPreferences(userId);
-    if (payload.enable_websocket !== undefined) pref.enable_websocket = payload.enable_websocket;
-    if (payload.enable_push !== undefined) pref.enable_push = payload.enable_push;
-    if (payload.enable_email !== undefined) pref.enable_email = payload.enable_email;
-    if (payload.enable_sms !== undefined) pref.enable_sms = payload.enable_sms;
+
+    if (payload.enable_websocket !== undefined) {
+      pref.enable_websocket = payload.enable_websocket;
+    }
+
+    if (payload.enable_push !== undefined) {
+      pref.enable_push = payload.enable_push;
+    }
+
+    if (payload.enable_email !== undefined) {
+      pref.enable_email = payload.enable_email;
+    }
+
+    if (payload.enable_sms !== undefined) {
+      pref.enable_sms = payload.enable_sms;
+    }
+
     pref.updated_at = new Date().toISOString();
+
     return pref;
   }
 
   // Store Push subscription
-  static addSubscription(userId: string, subscription: { endpoint: string, p256dh: string, auth: string }): PushSubscriptionRecord {
-    const existing = pushSubscriptions.find(s => s.user_id === userId && s.endpoint === subscription.endpoint);
-    if (existing) return existing;
+  static addSubscription(
+    userId: string,
+    subscription: {
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+    }
+  ): PushSubscriptionRecord {
+
+    const existing = pushSubscriptions.find(
+      s =>
+        s.user_id === userId &&
+        s.endpoint === subscription.endpoint
+    );
+
+    if (existing) {
+      return existing;
+    }
 
     const record: PushSubscriptionRecord = {
       id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -488,28 +523,59 @@ export class NotificationEngineService {
       auth: subscription.auth,
       created_at: new Date().toISOString()
     };
+
     pushSubscriptions.push(record);
-    console.log(`[PUSH STORAGE] Registered web-push subscription endpoint for user ${userId}`);
+
+    console.log(
+      `[PUSH STORAGE] Registered web-push subscription endpoint for user ${userId}`
+    );
+
     return record;
   }
 
+  // Retrieve all push subscriptions for a user
+  static getSubscriptions(userId: string): PushSubscriptionRecord[] {
+    return pushSubscriptions.filter(
+      subscription => subscription.user_id === userId
+    );
+  }
+
   // Primary Gateway: Queue a fresh Notification
-  static async sendNotification(userId: string, title: string, content: string, metadata?: any): Promise<{ success: boolean; jobId: string; queueMode: string }> {
+  static async sendNotification(
+    userId: string,
+    title: string,
+    content: string,
+    metadata?: any
+  ): Promise<{
+    success: boolean;
+    jobId: string;
+    queueMode: string;
+  }> {
+
     const pref = this.getPreferences(userId);
-    
+
     // Determine active channels based on user preferences
     const channels: ('websocket' | 'push' | 'email' | 'sms')[] = [];
+
     if (pref.enable_websocket) channels.push('websocket');
     if (pref.enable_push) channels.push('push');
     if (pref.enable_email) channels.push('email');
     if (pref.enable_sms) channels.push('sms');
 
     if (channels.length === 0) {
-      console.log(`[NOTIFICATION SERVICE] User ${userId} has muted all notification channels. Skipping queueing.`);
-      return { success: false, jobId: 'muted', queueMode };
+      console.log(
+        `[NOTIFICATION SERVICE] User ${userId} has muted all notification channels. Skipping queueing.`
+      );
+
+      return {
+        success: false,
+        jobId: 'muted',
+        queueMode
+      };
     }
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
     const payload: NotificationJobPayload = {
       id: jobId,
       userId,
@@ -530,19 +596,35 @@ export class NotificationEngineService {
             delay: 2000
           }
         });
-        console.log(`[DISTRIBUTED QUEUE] Added job ${jobId} to BullMQ cluster for user ${userId}.`);
+
+        console.log(
+          `[DISTRIBUTED QUEUE] Added job ${jobId} to BullMQ cluster for user ${userId}.`
+        );
+
       } catch (err) {
-        console.warn('[DISTRIBUTED QUEUE WARNING] Failed to insert job into BullMQ. Shifting to in-memory fallback engine.', err);
+        console.warn(
+          '[DISTRIBUTED QUEUE WARNING] Failed to insert job into BullMQ. Shifting to in-memory fallback engine.',
+          err
+        );
+
         this.enqueueInMemory(jobId, payload);
       }
+
     } else {
       this.enqueueInMemory(jobId, payload);
     }
 
-    return { success: true, jobId, queueMode };
+    return {
+      success: true,
+      jobId,
+      queueMode
+    };
   }
 
-  private static enqueueInMemory(jobId: string, payload: NotificationJobPayload) {
+  private static enqueueInMemory(
+    jobId: string,
+    payload: NotificationJobPayload
+  ) {
     inMemoryJobs.unshift({
       id: jobId,
       userId: payload.userId,
@@ -555,7 +637,10 @@ export class NotificationEngineService {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     });
-    console.log(`[IN-MEMORY RETRY QUEUE] Enqueued job ${jobId} for user ${payload.userId}.`);
+
+    console.log(
+      `[IN-MEMORY RETRY QUEUE] Enqueued job ${jobId} for user ${payload.userId}.`
+    );
   }
 
   // Retrieve current state of all queues

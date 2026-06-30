@@ -84,38 +84,71 @@ export function validateEnvironment() {
 // ============================================================================
 // 3. HELMET & CUSTOM CONTENT SECURITY POLICY (CSP)
 // ============================================================================
-// Customized to permit being framed in Google AI Studio Previews and load external maps assets
+// Tightened CSP while preserving required external services.
 export const helmetMiddleware = helmet({
-  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
-    directives: {
-      defaultSrc: ["'self'", "*"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://maps.googleapis.com", "*"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "*"],
-      imgSrc: [
-        "'self'", 
-        "data:", 
-        "https://images.unsplash.com", 
-        "https://*.tile.openstreetmap.org", 
-        "https://maps.gstatic.com", 
-        "https://maps.googleapis.com",
-        "https://*.run.app",
-        "*"
-      ],
-      connectSrc: ["'self'", "ws:", "wss:", "https://maps.googleapis.com", "https://*.run.app", "*"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:", "*"],
-      objectSrc: ["'none'"],
-      frameAncestors: [
-        "'self'", 
-        "https://*.google.com", 
-        "https://ai.studio", 
-        "https://*.run.app", 
-        "*"
-      ] // Permit framing for the developer environment preview
-    }
-  } : false,
+  contentSecurityPolicy:
+    process.env.NODE_ENV === 'production'
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+
+            scriptSrc: [
+              "'self'",
+              "'unsafe-inline'",
+              "'unsafe-eval'",
+              "https://maps.googleapis.com"
+            ],
+
+            styleSrc: [
+              "'self'",
+              "'unsafe-inline'",
+              "https://fonts.googleapis.com"
+            ],
+
+            imgSrc: [
+              "'self'",
+              "data:",
+              "https://images.unsplash.com",
+              "https://*.tile.openstreetmap.org",
+              "https://maps.gstatic.com",
+              "https://maps.googleapis.com",
+              "https://*.run.app"
+            ],
+
+            connectSrc: [
+              "'self'",
+              "ws:",
+              "wss:",
+              "https://maps.googleapis.com",
+              "https://*.run.app"
+            ],
+
+            fontSrc: [
+              "'self'",
+              "https://fonts.gstatic.com",
+              "data:"
+            ],
+
+            objectSrc: ["'none'"],
+
+            frameAncestors: [
+              "'self'",
+              "https://*.google.com",
+              "https://ai.studio",
+              "https://*.run.app"
+            ]
+          }
+        }
+      : false,
+
   crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  frameguard: false // Disable X-Frame-Options to allow framing in AI Studio Sandbox
+
+  crossOriginResourcePolicy: {
+    policy: "cross-origin"
+  },
+
+  // Keep disabled until we finish AI Studio / iframe development.
+  frameguard: false
 });
 
 // ============================================================================

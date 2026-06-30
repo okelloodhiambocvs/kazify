@@ -2865,13 +2865,39 @@ app.get('/api/notifications', authenticateToken, (req, res) => {
 });
 
 // NOTIFICATIONS: Mark as read
-app.post('/api/notifications/:id/read', (req, res) => {
-  const id = req.params.id;
-  const idx = notifications.findIndex(n => n.id === id);
-  if (idx !== -1) {
-    notifications[idx].is_read = true;
+app.post('/api/notifications/:id/read', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
   }
-  res.json({ success: true });
+
+  const notification = notifications.find(
+    n => n.id === req.params.id
+  );
+
+  if (!notification) {
+    return res.status(404).json({
+      error: 'Notification not found.'
+    });
+  }
+
+  if (
+    authUser.role !== 'admin' &&
+    notification.user_id !== authUser.id
+  ) {
+    return res.status(403).json({
+      error: 'You are not authorized to modify this notification.'
+    });
+  }
+
+  notification.is_read = true;
+
+  res.json({
+    success: true
+  });
 });
 
 // ADMIN: Get metric analytics reports

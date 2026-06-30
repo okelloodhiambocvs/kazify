@@ -176,7 +176,15 @@ function requireAdmin(
 
 const app = express();
 app.set('trust proxy', 1);
+
 const server = http.createServer(app);
+
+// Production HTTP server timeout hardening
+server.requestTimeout = 30_000;      // 30 seconds
+server.headersTimeout = 35_000;      // Must be greater than requestTimeout
+server.keepAliveTimeout = 5_000;     // 5 seconds
+server.timeout = 30_000;             // Legacy socket timeout
+
 const PORT = 3000;
 
 // Apply Helmet & CSP headers

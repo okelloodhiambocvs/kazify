@@ -4642,14 +4642,15 @@ app.post('/api/escrow/:jobId/milestones', authenticateToken, (req, res) => {
     });
   }
 
-  // Only the customer who owns the job or an administrator may create milestones
+  // Only participants in the job or an administrator may create milestones
   const authorized =
     authUser.role === 'admin' ||
-    job.customer_id === authUser.id;
+    job.customer_id === authUser.id ||
+    job.fundi_id === authUser.id;
 
   if (!authorized) {
     return res.status(403).json({
-      error: 'Only the customer or an administrator may create escrow milestones.'
+      error: 'You are not authorized to create escrow milestones for this job.'
     });
   }
 
@@ -5276,6 +5277,7 @@ app.post('/api/admin/users/:id/status', authenticateToken, requireAdmin, (req, r
   });
 });
 
+
 // 2b. Change User Role (Role Changes)
 app.post('/api/admin/users/:id/role', authenticateToken, requireAdmin, (req, res) => {
   const admin = (req as AuthenticatedRequest).user;
@@ -5306,7 +5308,7 @@ app.post('/api/admin/users/:id/role', authenticateToken, requireAdmin, (req, res
     });
   }
 
-  // Prevent an admin from removing their own admin privileges
+  // Prevent an admin from removing their own administrator privileges
   if (
     admin.id === targetId &&
     targetUser.role === 'admin' &&
@@ -5315,6 +5317,20 @@ app.post('/api/admin/users/:id/role', authenticateToken, requireAdmin, (req, res
     return res.status(400).json({
       error: 'You cannot remove your own administrator privileges.'
     });
+  }
+
+  // Prevent removal of the last administrator account
+  if (
+    targetUser.role === 'admin' &&
+    role !== 'admin'
+  ) {
+    const adminCount = users.filter(u => u.role === 'admin').length;
+
+    if (adminCount <= 1) {
+      return res.status(400).json({
+        error: 'The last administrator account cannot be demoted.'
+      });
+    }
   }
 
   const oldRole = targetUser.role;

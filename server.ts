@@ -176,23 +176,51 @@ const PORT = 3000;
 // Apply Helmet & CSP headers
 app.use(helmetMiddleware);
 
-const allowedOrigins = [
-  "http://localhost:3000",
-  process.env.FRONTEND_URL,
-].filter(Boolean);
+// Allowed CORS Origins
+const allowedOrigins = new Set(
+  [
+    process.env.FRONTEND_URL,
+    process.env.ADMIN_FRONTEND_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ].filter((origin): origin is string => Boolean(origin))
+);
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
+      // Allow requests without an Origin header (Postman, curl, mobile apps, server-to-server)
+      if (!origin) {
         return callback(null, true);
       }
 
-      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+      if (allowedOrigins.has(origin)) {
+        return callback(null, true);
+      }
+
+      logger.warn(`Blocked CORS request from origin: ${origin}`);
+
+      return callback(new Error("Origin not allowed by CORS"));
     },
+
     credentials: true,
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-CSRF-Token",
+    ],
   })
 );
 

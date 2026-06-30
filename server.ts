@@ -2783,10 +2783,26 @@ app.get('/api/chats/:job_id', (req, res) => {
 });
 
 // NOTIFICATIONS: Get list
-app.get('/api/notifications', (req, res) => {
-  const userId = req.query.user_id as string;
-  const filtered = notifications.filter(n => n.user_id === userId);
-  res.json(filtered);
+app.get('/api/notifications', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  // Administrators may view all notifications
+  if (authUser.role === 'admin') {
+    return res.json(notifications);
+  }
+
+  // Customers and Fundis may only view their own notifications
+  const visibleNotifications = notifications.filter(
+    notification => notification.user_id === authUser.id
+  );
+
+  res.json(visibleNotifications);
 });
 
 // NOTIFICATIONS: Mark as read

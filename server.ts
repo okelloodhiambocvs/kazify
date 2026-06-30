@@ -1542,10 +1542,24 @@ app.post('/api/auth/refresh', (req, res) => {
         name: user.name
       };
 
+      // ==============================
+      // Refresh Token Rotation
+      // ==============================
+
+      // Revoke the old refresh token
+      refreshTokensRegistry.delete(refreshToken);
+
+      // Issue a brand-new refresh token
+      const newRefreshToken = generateRefreshToken({
+        id: user.id
+      });
+
+      // Issue a new access token
       const newAccessToken = generateAccessToken(userPayload);
 
       return res.json({
-        token: newAccessToken
+        token: newAccessToken,
+        refreshToken: newRefreshToken
       });
     }
   );
@@ -1554,37 +1568,60 @@ app.post('/api/auth/refresh', (req, res) => {
 // AUTH: Logout/Revoke Refresh Token
 app.post('/api/auth/logout', (req, res) => {
   const { refreshToken } = req.body;
+
   if (refreshToken) {
     refreshTokensRegistry.delete(refreshToken);
   }
-  res.json({ success: true, message: 'Successfully logged out' });
+
+  res.json({
+    success: true,
+    message: 'Successfully logged out'
+  });
 });
 
 // AUTH: Request Password Reset
 app.post('/api/auth/password-reset-request', (req, res) => {
   const { email } = req.body;
+
   if (!email) {
-    return res.status(400).json({ error: 'Email address is required' });
+    return res.status(400).json({
+      error: 'Email address is required'
+    });
   }
 
-  const user = users.find(u => u.email?.toLowerCase() === email.toLowerCase());
-  // Production practice: Do not disclose if email exists, but we can log link for local testing/grading
-  const resetToken = jwt.sign({ id: user ? user.id : 'fake' }, JWT_SECRET, { expiresIn: '1h' });
+  const user = users.find(
+    u => u.email?.toLowerCase() === email.toLowerCase()
+  );
+
+  // Production practice: Do not disclose if email exists
+  const resetToken = jwt.sign(
+    { id: user ? user.id : 'fake' },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
 
   if (user) {
     user.password_reset_token = resetToken;
-    user.password_reset_expires = new Date(Date.now() + 3600000).toISOString(); // 1 hour
-    
-    // Create an in-app notification to let the user see the simulated reset email/token easily!
-    createNotification(user.id, "Password Reset Link", `A password reset link was requested. Token: ${resetToken}`);
+    user.password_reset_expires = new Date(
+      Date.now() + 3600000
+    ).toISOString();
+
+    createNotification(
+      user.id,
+      'Password Reset Link',
+      `A password reset link was requested. Token: ${resetToken}`
+    );
   }
 
   console.log(`[AUTH] Simulated Password Reset Email sent to ${email}`);
-  console.log(`[AUTH] Link: http://localhost:3000/api/auth/password-reset?token=${resetToken}`);
+  console.log(
+    `[AUTH] Link: http://localhost:3000/api/auth/password-reset?token=${resetToken}`
+  );
 
-  res.json({ 
-    success: true, 
-    message: 'If the email matches a registered account, a password reset link has been dispatched.',
+  res.json({
+    success: true,
+    message:
+      'If the email matches a registered account, a password reset link has been dispatched.',
     resetToken,
     simulatedLink: `http://localhost:3000/api/auth/password-reset?token=${resetToken}`
   });
@@ -1595,35 +1632,53 @@ app.post('/api/auth/password-reset', (req, res) => {
   const { token, newPassword } = req.body;
 
   if (!token || !newPassword) {
-    return res.status(400).json({ error: 'Token and new password are required' });
+    return res.status(400).json({
+      error: 'Token and new password are required'
+    });
   }
 
   jwt.verify(token, JWT_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(403).json({ error: 'Invalid or expired password reset token' });
+      return res.status(403).json({
+        error: 'Invalid or expired password reset token'
+      });
     }
 
     const payload = decoded as { id: string };
-    const user = users.find(u => u.id === payload.id && u.password_reset_token === token);
+
+    const user = users.find(
+      u => u.id === payload.id && u.password_reset_token === token
+    );
 
     if (!user) {
-      return res.status(400).json({ error: 'Invalid or expired password reset token' });
+      return res.status(400).json({
+        error: 'Invalid or expired password reset token'
+      });
     }
 
-    // Verify token expiration
-    if (user.password_reset_expires && new Date(user.password_reset_expires) < new Date()) {
-      return res.status(400).json({ error: 'Password reset token has expired' });
+    if (
+      user.password_reset_expires &&
+      new Date(user.password_reset_expires) < new Date()
+    ) {
+      return res.status(400).json({
+        error: 'Password reset token has expired'
+      });
     }
 
-    // Hash and update
     user.password = bcrypt.hashSync(newPassword, 10);
     user.password_reset_token = undefined;
     user.password_reset_expires = undefined;
 
-    // Notify user
-    createNotification(user.id, "Password Reset Successful", "Your account password has been successfully updated.");
+    createNotification(
+      user.id,
+      'Password Reset Successful',
+      'Your account password has been successfully updated.'
+    );
 
-    res.json({ success: true, message: 'Password has been successfully reset.' });
+    res.json({
+      success: true,
+      message: 'Password has been successfully reset.'
+    });
   });
 });
 

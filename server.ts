@@ -5533,120 +5533,152 @@ app.get('/api/admin/audit-logs', authenticateToken, requireAdmin, (req, res) => 
 // 5. Fraud Detection Alerts
 app.get('/api/admin/fraud/detections', authenticateToken, requireAdmin, (req, res) => {
   const alerts: any[] = [];
+  const now = new Date().toISOString();
 
   // 1. High Dispute Rate
   users.forEach(u => {
-    const userJobs = jobs.filter(j => j.customer_id === u.id || j.fundi_id === u.id);
-    const userDisputes = disputes.filter(d => d.initiator_id === u.id);
-    
+    const userJobs = jobs.filter(
+      j => j.customer_id === u.id || j.fundi_id === u.id
+    );
+
+    const userDisputes = disputes.filter(
+      d => d.initiator_id === u.id
+    );
+
     if (userJobs.length >= 3) {
       const disputeRate = userDisputes.length / userJobs.length;
+
       if (disputeRate > 0.3) {
         alerts.push({
-          id: `FRD-${Math.floor(1000 + Math.random() * 9000)}`,
+          id: `FRD-HIGH-DISPUTE-${u.id}`,
           user_id: u.id,
           user_name: u.name,
           risk_level: disputeRate > 0.5 ? 'CRITICAL' : 'HIGH',
           rule_triggered: 'HIGH_DISPUTE_RATE',
           details: `User has an abnormally high dispute rate of ${Math.round(disputeRate * 100)}% (${userDisputes.length} disputes out of ${userJobs.length} jobs).`,
-          timestamp: new Date().toISOString()
+          timestamp: now
         });
       }
     }
 
     // 2. Unverified High Balance
     const kyc = kycDocuments.find(d => d.user_id === u.id);
-    const w = wallets.find(wallet => wallet.user_id === u.id);
-    if ((!kyc || kyc.status !== 'approved') && w && w.balance > 40000) {
+    const wallet = wallets.find(w => w.user_id === u.id);
+
+    if ((!kyc || kyc.status !== 'approved') && wallet && wallet.balance > 40000) {
       alerts.push({
-        id: `FRD-${Math.floor(1000 + Math.random() * 9000)}`,
+        id: `FRD-KYC-BALANCE-${u.id}`,
         user_id: u.id,
         user_name: u.name,
         risk_level: 'HIGH',
         rule_triggered: 'UNVERIFIED_HIGH_BALANCE',
-        details: `User is unverified (KYC status: ${kyc ? kyc.status : 'None'}) but has a substantial wallet balance of KES ${w.balance.toLocaleString()}.`,
-        timestamp: new Date().toISOString()
+        details: `User is unverified (KYC status: ${kyc ? kyc.status : 'None'}) but has a wallet balance exceeding the review threshold.`,
+        timestamp: now
       });
     }
   });
 
   // 3. Repeated Payment Failures
-  const failedTrans = transactions.filter(t => t.status === 'failed');
-  const failureByPhone: { [phone: string]: number } = {};
-  failedTrans.forEach(t => {
-    failureByPhone[t.phone_number] = (failureByPhone[t.phone_number] || 0) + 1;
+  const failedTransactions = transactions.filter(
+    t => t.status === 'failed'
+  );
+
+  const failureByPhone: Record<string, number> = {};
+
+  failedTransactions.forEach(t => {
+    failureByPhone[t.phone_number] =
+      (failureByPhone[t.phone_number] || 0) + 1;
   });
 
-  Object.keys(failureByPhone).forEach(phone => {
-    if (failureByPhone[phone] >= 3) {
+  Object.entries(failureByPhone).forEach(([phone, failures]) => {
+    if (failures >= 3) {
       const matchedUser = users.find(u => u.phone === phone);
+
       alerts.push({
-        id: `FRD-${Math.floor(1000 + Math.random() * 9000)}`,
+        id: `FRD-PAYMENT-FAIL-${matchedUser?.id ?? phone}`,
         user_id: matchedUser?.id || 'anonymous',
-        user_name: matchedUser?.name || 'Anonymous M-Pesa Line',
+        user_name: matchedUser?.name || 'Anonymous User',
         risk_level: 'MEDIUM',
         rule_triggered: 'REPEATED_PAYMENT_FAILURE',
-        details: `M-Pesa line ${phone} registered ${failureByPhone[phone]} consecutive payment checkout failures. Potential SIM card swiping or fraud attempt.`,
-        timestamp: new Date().toISOString()
+        details: `Account registered ${failures} consecutive failed payment attempts.`,
+        timestamp: now
       });
     }
   });
 
   // 4. High Value Transactions
-  jobs.forEach(j => {
-    if (j.amount > 80000) {
+  jobs.forEach(job => {
+    if (job.amount > 80000) {
       alerts.push({
-        id: `FRD-${Math.floor(1000 + Math.random() * 9000)}`,
-        job_id: j.id,
-        user_name: j.customer_name,
+        id: `FRD-HIGH-VALUE-${job.id}`,
+        job_id: job.id,
+        user_name: job.customer_name,
         risk_level: 'MEDIUM',
         rule_triggered: 'HIGH_VALUE_TRANSACTION',
-        details: `Service Request #${j.id.substring(0, 8)} has an abnormally high value of KES ${j.amount.toLocaleString()}. Subject to money laundering reviews.`,
-        timestamp: new Date().toISOString()
+        details: `Service request #${job.id.substring(0, 8)} exceeded the high-value review threshold.`,
+        timestamp: now
       });
     }
   });
 
-  // 5. Rapid failed login attempts (Brute force protection)
-  const uniqueAttemptEmails = Array.from(new Set(loginAttempts.map(la => la.email)));
-  uniqueAttemptEmails.forEach(email => {
-    const recentFails = loginAttempts.filter(
-      la => la.email === email && !la.success && (Date.now() - la.timestamp) < 15 * 60 * 1000
+  // 5. Rapid Failed Login Attempts
+  const uniqueEmails = [...new Set(loginAttempts.map(a => a.email))];
+
+  uniqueEmails.forEach(email => {
+    const recentFailures = loginAttempts.filter(
+      a =>
+        a.email === email &&
+        !a.success &&
+        Date.now() - a.timestamp < 15 * 60 * 1000
     );
-    if (recentFails.length >= 3) {
-      const matchedUser = users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+
+    if (recentFailures.length >= 3) {
+      const matchedUser = users.find(
+        u => u.email?.toLowerCase() === email.toLowerCase()
+      );
+
       alerts.push({
-        id: `FRD-${Math.floor(1000 + Math.random() * 9000)}`,
+        id: `FRD-LOGIN-${matchedUser?.id ?? email}`,
         user_id: matchedUser?.id || 'anonymous',
         user_name: matchedUser?.name || 'Anonymous User',
         risk_level: 'CRITICAL',
         rule_triggered: 'RAPID_LOGIN_FAILURES',
-        details: `Email/Account "${email}" experienced ${recentFails.length} failed login attempts in the last 15 minutes. Potential credential-stuffing or brute-force attack.`,
-        timestamp: new Date().toISOString()
+        details: `Account experienced ${recentFailures.length} failed login attempts within 15 minutes.`,
+        timestamp: now
       });
     }
   });
 
-  // 6. Suspiciously rapid job completion (Collusive payout / Review fraud)
-  jobs.forEach(j => {
-    if (j.status === 'completed' && j.created_at) {
-      const durationMs = Date.now() - new Date(j.created_at).getTime();
-      if (durationMs > 0 && durationMs < 5 * 60 * 1000) {
-        alerts.push({
-          id: `FRD-${Math.floor(1000 + Math.random() * 9000)}`,
-          job_id: j.id,
-          user_name: j.customer_name,
-          risk_level: 'HIGH',
-          rule_triggered: 'RAPID_JOB_COMPLETION',
-          details: `Service Request #${j.id.substring(0, 8)} ("${j.title}") was marked completed in under 5 minutes from creation. This is indicative of collusive reviewer padding or direct money transmission/payout bypassing.`,
-          timestamp: new Date().toISOString()
-        });
-      }
+  // 6. Suspiciously Rapid Job Completion
+  jobs.forEach(job => {
+    if (job.status !== 'completed') return;
+
+    const created = new Date(job.created_at).getTime();
+
+    if (
+      Number.isFinite(created) &&
+      Date.now() - created < 5 * 60 * 1000
+    ) {
+      alerts.push({
+        id: `FRD-RAPID-COMPLETE-${job.id}`,
+        job_id: job.id,
+        user_name: job.customer_name,
+        risk_level: 'HIGH',
+        rule_triggered: 'RAPID_JOB_COMPLETION',
+        details: `Service request #${job.id.substring(0, 8)} was completed unusually quickly and should be reviewed.`,
+        timestamp: now
+      });
     }
   });
 
-  // 7. Append automated sentinel alerts (Multi-IP logins and Transaction Velocity holds)
+  // 7. System Security Alerts
   alerts.push(...securityAlerts);
+
+  alerts.sort(
+    (a, b) =>
+      new Date(b.timestamp).getTime() -
+      new Date(a.timestamp).getTime()
+  );
 
   res.json(alerts);
 });

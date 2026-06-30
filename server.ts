@@ -4631,17 +4631,51 @@ app.get('/api/notifications/vapid-key', authenticateToken, (req, res) => {
 
 app.post('/api/notifications/subscribe', authenticateToken, (req, res) => {
   const user = (req as AuthenticatedRequest).user;
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  const { endpoint, keys } = req.body;
-  if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
-    return res.status(400).json({ error: 'Invalid web-push subscription format.' });
+
+  if (!user) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
   }
+
+  const { endpoint, keys } = req.body;
+
+  if (
+    !endpoint ||
+    typeof endpoint !== 'string' ||
+    !keys ||
+    typeof keys !== 'object' ||
+    !keys.p256dh ||
+    !keys.auth
+  ) {
+    return res.status(400).json({
+      error: 'Invalid web-push subscription format.'
+    });
+  }
+
+  // Prevent duplicate subscriptions
+  const existing = NotificationEngineService
+    .getSubscriptions(user.id)
+    .find(sub => sub.endpoint === endpoint);
+
+  if (existing) {
+    return res.json({
+      success: true,
+      message: 'Subscription already registered.',
+      record: existing
+    });
+  }
+
   const record = NotificationEngineService.addSubscription(user.id, {
     endpoint,
     p256dh: keys.p256dh,
     auth: keys.auth
   });
-  res.json({ success: true, record });
+
+  res.json({
+    success: true,
+    record
+  });
 });
 
 // 4. Admin: Get Notification Queue Status & Metrics

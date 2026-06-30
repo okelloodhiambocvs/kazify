@@ -5377,6 +5377,13 @@ app.post('/api/admin/users/:id/wallet-override', authenticateToken, requireAdmin
     });
   }
 
+  // Prevent administrators from modifying their own wallet
+  if (admin.id === targetId) {
+    return res.status(400).json({
+      error: 'Administrators cannot perform wallet overrides on their own accounts.'
+    });
+  }
+
   let wallet = wallets.find(w => w.user_id === targetId);
 
   if (!wallet) {

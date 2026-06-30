@@ -147,8 +147,10 @@ export const helmetMiddleware = helmet({
     policy: "cross-origin"
   },
 
-  // Keep disabled until we finish AI Studio / iframe development.
-  frameguard: false
+  // Protect against clickjacking by allowing framing only from the same origin.
+  frameguard: {
+    action: "sameorigin"
+  }
 });
 
 // ============================================================================

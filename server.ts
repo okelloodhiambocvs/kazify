@@ -36,6 +36,12 @@ const JWT_AUDIENCE = 'kazify-users';
 // In-memory registry for valid refresh tokens to allow secure revoking
 const refreshTokensRegistry = new Set<string>();
 
+// Dummy bcrypt hash used to mitigate login timing attacks
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
+  'kazify_dummy_password',
+  10
+);
+
 interface AuthenticatedRequest extends express.Request {
   user?: {
     id: string;
@@ -1385,26 +1391,43 @@ app.post('/api/auth/login', (req, res) => {
     return false;
   });
 
-  if (!user || !user.password) {
-    loginAttempts.push({ email: loginEmail, timestamp: Date.now(), success: false, ip });
-    return res.status(401).json({ error: 'Invalid identified user credentials' });
-  }
+  // Always perform bcrypt verification to reduce timing attacks
+  const passwordHash = user?.password || DUMMY_PASSWORD_HASH;
 
-  const isPasswordValid = bcrypt.compareSync(password, user.password);
-  if (!isPasswordValid) {
-    loginAttempts.push({ email: loginEmail, timestamp: Date.now(), success: false, ip });
-    return res.status(401).json({ error: 'Invalid identified user credentials' });
+  const isPasswordValid = bcrypt.compareSync(
+    password,
+    passwordHash
+  );
+
+  if (!user || !user.password || !isPasswordValid) {
+    loginAttempts.push({
+      email: loginEmail,
+      timestamp: Date.now(),
+      success: false,
+      ip
+    });
+
+    return res.status(401).json({
+      error: 'Invalid credentials'
+    });
   }
 
   // Record successful login attempt
-  loginAttempts.push({ email: loginEmail, timestamp: Date.now(), success: true, ip });
+  loginAttempts.push({
+    email: loginEmail,
+    timestamp: Date.now(),
+    success: true,
+    ip
+  });
 
   // Evaluate security rules for Multi-IP logins
   evaluateFraudAndVelocityRules(user.id, 'login', { ip });
 
   // Re-check suspension after evaluating security sentinel rules
   if (user.status === 'suspended') {
-    return res.status(403).json({ error: 'Account suspended: Your account is on an automated administrative hold subject to manual security review.' });
+    return res.status(403).json({
+      error: 'Account suspended: Your account is on an automated administrative hold subject to manual security review.'
+    });
   }
 
   // Create JWT payload

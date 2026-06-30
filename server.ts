@@ -2749,36 +2749,95 @@ app.get('/api/escrow/history', authenticateToken, (req, res) => {
 });
 
 // CHATS: Send text message
-app.post('/api/chats', (req, res) => {
-  const { job_id, sender_id, sender_name, message } = req.body;
+app.post('/api/chats', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  const { job_id, message } = req.body;
+
+  const job = jobs.find(j => j.id === job_id);
+
+  if (!job) {
+    return res.status(404).json({
+      error: 'Job not found.'
+    });
+  }
+
+  // Admins may participate in any chat
+  if (
+    authUser.role !== 'admin' &&
+    authUser.id !== job.customer_id &&
+    authUser.id !== job.fundi_id
+  ) {
+    return res.status(403).json({
+      error: 'You are not authorized to send messages for this job.'
+    });
+  }
 
   const newMsg: LocalChatMessage = {
     id: `msg_${Date.now()}`,
     job_id,
-    sender_id,
-    sender_name,
+    sender_id: authUser.id,
+    sender_name: authUser.name,
     message,
     created_at: new Date().toISOString()
   };
 
   chatMessages.push(newMsg);
 
-  const job = jobs.find(j => j.id === job_id);
-  if (job) {
-    // Relay to recipient
-    const recipientId = sender_id === job.customer_id ? job.fundi_id : job.customer_id;
-    if (recipientId) {
-      sendWSMessage(recipientId, { type: 'new_chat_message', chatMessage: newMsg });
-    }
+  const recipientId =
+    authUser.id === job.customer_id
+      ? job.fundi_id
+      : job.customer_id;
+
+  if (recipientId) {
+    sendWSMessage(recipientId, {
+      type: 'new_chat_message',
+      chatMessage: newMsg
+    });
   }
 
   res.json(newMsg);
 });
 
 // CHATS: Get history logs
-app.get('/api/chats/:job_id', (req, res) => {
-  const jobId = req.params.job_id;
-  const filtered = chatMessages.filter(m => m.job_id === jobId);
+app.get('/api/chats/:job_id', authenticateToken, (req, res) => {
+  const authUser = (req as AuthenticatedRequest).user;
+
+  if (!authUser) {
+    return res.status(401).json({
+      error: 'Authentication required.'
+    });
+  }
+
+  const job = jobs.find(j => j.id === req.params.job_id);
+
+  if (!job) {
+    return res.status(404).json({
+      error: 'Job not found.'
+    });
+  }
+
+  // Admins may view any chat
+  if (
+    authUser.role !== 'admin' &&
+    authUser.id !== job.customer_id &&
+    authUser.id !== job.fundi_id
+  ) {
+    return res.status(403).json({
+      error: 'You are not authorized to view this chat.'
+    });
+  }
+
+  const filtered = chatMessages.filter(
+    m => m.job_id === req.params.job_id
+  );
+
   res.json(filtered);
 });
 

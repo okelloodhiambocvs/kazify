@@ -175,6 +175,10 @@ function requireAdmin(
 }
 
 const app = express();
+
+// Hide Express fingerprint
+app.disable('x-powered-by');
+
 app.set('trust proxy', 1);
 
 const server = http.createServer(app);

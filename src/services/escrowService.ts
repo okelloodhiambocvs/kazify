@@ -457,92 +457,136 @@ export class EscrowEngine {
   /**
    * MILESTONE RELEASE WORKFLOW
    */
-  public static releaseMilestone(milestoneId: string, description: string): Settlement {
-    const milestone = escrowMilestones.find(m => m.id === milestoneId);
-    if (!milestone) {
-      throw new Error('Escrow milestone not found.');
-    }
-    if (milestone.status !== 'funded') {
-      throw new Error(`Milestone release denied. Status is ${milestone.status}`);
-    }
+  public static releaseMilestone(
+  milestoneId: string,
+  description: string
+): Settlement {
+  const milestone = escrowMilestones.find(
+    m => m.id === milestoneId
+  );
 
-    const escAcc = escrowAccounts.find(ea => ea.id === milestone.escrow_account_id);
-    if (!escAcc || !escAcc.fundi_id) {
-      throw new Error('Valid master escrow account or tradesperson details missing.');
-    }
+  if (!milestone) {
+    throw new Error('Escrow milestone not found.');
+  }
 
-    milestone.status = 'released';
-    milestone.updated_at = new Date().toISOString();
+  if (milestone.status !== 'funded') {
+    throw new Error(
+      `Milestone release denied. Status is ${milestone.status}`
+    );
+  }
 
-    // Deduct released values from master account totals
-    escAcc.amount -= milestone.amount;
-    escAcc.commission_fee -= milestone.commission_fee;
-    escAcc.payout_amount -= milestone.payout_amount;
+  const escAcc = escrowAccounts.find(
+    ea => ea.id === milestone.escrow_account_id
+  );
 
-    if (escAcc.amount < 0.01) {
-      escAcc.status = 'released';
-    }
-    escAcc.updated_at = new Date().toISOString();
+  if (!escAcc || !escAcc.fundi_id) {
+    throw new Error(
+      'Valid master escrow account or tradesperson details missing.'
+    );
+  }
 
-    const settlement: Settlement = {
-      id: `set_${crypto.randomBytes(6).toString('hex')}`,
+  // ------------------------------------------------------------------
+  // NEW: Ensure the escrow account still contains sufficient funds
+  // before releasing this milestone.
+  // ------------------------------------------------------------------
+  if (
+    milestone.amount > escAcc.amount ||
+    milestone.commission_fee > escAcc.commission_fee ||
+    milestone.payout_amount > escAcc.payout_amount
+  ) {
+    throw new Error(
+      'Escrow account does not contain sufficient remaining funds for this milestone.'
+    );
+  }
+
+  milestone.status = 'released';
+  milestone.updated_at = new Date().toISOString();
+
+  // Deduct released values from master account totals
+  escAcc.amount -= milestone.amount;
+  escAcc.commission_fee -= milestone.commission_fee;
+  escAcc.payout_amount -= milestone.payout_amount;
+
+  // ------------------------------------------------------------------
+  // NEW: Protect against negative balances caused by corruption or
+  // unexpected state changes.
+  // ------------------------------------------------------------------
+  if (
+    escAcc.amount < 0 ||
+    escAcc.commission_fee < 0 ||
+    escAcc.payout_amount < 0
+  ) {
+    throw new Error(
+      'Escrow ledger integrity violation detected.'
+    );
+  }
+
+  if (escAcc.amount < 0.01) {
+    escAcc.status = 'released';
+  }
+
+  escAcc.updated_at = new Date().toISOString();
+
+  const settlement: Settlement = {
+    id: `set_${crypto.randomBytes(6).toString('hex')}`,
+    escrow_account_id: escAcc.id,
+    milestone_id: milestone.id,
+    job_id: escAcc.job_id,
+    fundi_id: escAcc.fundi_id,
+    amount_gross: milestone.amount,
+    platform_fee: milestone.commission_fee,
+    amount_net: milestone.payout_amount,
+    status: 'settled',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  settlements.push(settlement);
+
+  // Ledger Double Entry:
+  this.recordLedgerTransaction([
+    {
+      ledger_group_id: '',
       escrow_account_id: escAcc.id,
       milestone_id: milestone.id,
-      job_id: escAcc.job_id,
-      fundi_id: escAcc.fundi_id,
-      amount_gross: milestone.amount,
-      platform_fee: milestone.commission_fee,
-      amount_net: milestone.payout_amount,
-      status: 'settled',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    settlements.push(settlement);
-
-    // Ledger Double Entry:
-    this.recordLedgerTransaction([
-      {
-        ledger_group_id: '',
-        escrow_account_id: escAcc.id,
-        milestone_id: milestone.id,
-        amount: milestone.amount,
-        direction: 'debit',
-        ledger_account: 'escrow_held',
-        description: `Milestone release debit hold: ${milestone.title}`,
-        reference_id: escAcc.job_id
-      },
-      {
-        ledger_group_id: '',
-        escrow_account_id: escAcc.id,
-        milestone_id: milestone.id,
-        amount: milestone.commission_fee,
-        direction: 'credit',
-        ledger_account: 'platform_earnings',
-        description: `Platform fee on released milestone "${milestone.title}"`,
-        reference_id: escAcc.job_id
-      },
-      {
-        ledger_group_id: '',
-        escrow_account_id: escAcc.id,
-        milestone_id: milestone.id,
-        user_id: escAcc.fundi_id,
-        amount: milestone.payout_amount,
-        direction: 'credit',
-        ledger_account: 'payout_clearing',
-        description: `Milestone payout clearing: ${milestone.title}`,
-        reference_id: escAcc.job_id
-      }
-    ]);
-
-    this.createPayout({
-      settlementId: settlement.id,
-      userId: escAcc.fundi_id,
+      amount: milestone.amount,
+      direction: 'debit',
+      ledger_account: 'escrow_held',
+      description: `Milestone release debit hold: ${milestone.title}`,
+      reference_id: escAcc.job_id
+    },
+    {
+      ledger_group_id: '',
+      escrow_account_id: escAcc.id,
+      milestone_id: milestone.id,
+      amount: milestone.commission_fee,
+      direction: 'credit',
+      ledger_account: 'platform_earnings',
+      description: `Platform fee on released milestone "${milestone.title}"`,
+      reference_id: escAcc.job_id
+    },
+    {
+      ledger_group_id: '',
+      escrow_account_id: escAcc.id,
+      milestone_id: milestone.id,
+      user_id: escAcc.fundi_id,
       amount: milestone.payout_amount,
-      destination: 'M-Pesa line'
-    });
+      direction: 'credit',
+      ledger_account: 'payout_clearing',
+      description: `Milestone payout clearing: ${milestone.title}`,
+      reference_id: escAcc.job_id
+    }
+  ]);
 
-    return settlement;
-  }
+  this.createPayout({
+    settlementId: settlement.id,
+    userId: escAcc.fundi_id,
+    amount: milestone.payout_amount,
+    destination: 'M-Pesa line'
+  });
+
+  return settlement;
+}
 
   /**
    * ARBITRATED DISPUTE RESOLUTION WORKFLOW

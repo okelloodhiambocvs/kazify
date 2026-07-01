@@ -21,10 +21,10 @@ import {
   logger
 } from './src/services/securityHardening';
 
-
-
-
 dotenv.config();
+
+// Validate and populate environment before consuming any values
+validateEnvironment();
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
@@ -1402,7 +1402,6 @@ global.onMpesaTransactionCompleted = (intent: PaymentIntent, transaction: Transa
   console.log(`[LEDGER RECONCILIATION SUCCESS] Auto-reconciled intent ${intent.id} and transaction ${transaction.id}. Adjusting KAZIFY balances.`);
   finalizeJobEscrowPayment(intent.job_id, transaction.amount);
 };
-
 
 // --- REST API ENDPOINTS ---
 
@@ -6255,7 +6254,6 @@ app.get('/api/admin/analytics', authenticateToken, requireAdmin, (req, res) => {
 
 async function startServer() {
   // Validate environment variables and initialize Sentry/BetterStack telemetry systems
-  validateEnvironment();
   telemetry.initialize();
 
   if (process.env.NODE_ENV !== 'production') {

@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "ABC Diatype Plus Variable", "ABC Diatype Plus", "ABC Diatype", "Diatype Replit Screen", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "ABC Diatype Plus Variable", "ABC Diatype Plus", "ABC Diatype", "Diatype Replit Screen", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-brand-blue: #0066FF;
+  --color-brand-blue-dark: #0052D4;
+  --color-brand-navy: #0B132B;
+  --color-brand-orange: #FF7A00;
+  --color-brand-orange-light: #FF9900;
+}
+
+:root {
+  --bg-page: #FAFAFA;
+  --bg-surface: #FFFFFF;
+  --bg-muted: #F1F5F9;
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --border-default: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --shadow-subtle: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+}
+
+.dark {
+  --bg-page: #090D16;
+  --bg-surface: #0F172A;
+  --bg-muted: #1E293B;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --shadow-subtle: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+html, body {
+  font-family: "ABC Diatype Plus Variable", "ABC Diatype Plus", "ABC Diatype", "Diatype Replit Screen", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body.light {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+}
+
+/* Light mode overrides for white-dominant palette with high text visibility */
+html.light {
+  color-scheme: light;
+}
+
+html.light body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+}
+
+/* Base Light Mode Text Colors (High Contrast Slate) */
+html.light .text-slate-900,
+html.light .text-slate-800 {
+  color: #0F172A;
+}
+
+html.light .text-slate-700,
+html.light .text-slate-600 {
+  color: #1E293B;
+}
+
+html.light .text-slate-500 {
+  color: #334155;
+}
+
+html.light .text-slate-400 {
+  color: #475569;
+}
+
+/* Hero Header & Footer dark sections preserve crisp light text */
+html.light header#hero-header,
+html.light footer {
+  background-color: #090D16;
+  color: #F8FAFC;
+}
+
+html.light header#hero-header .text-white,
+html.light header#hero-header .text-slate-100,
+html.light header#hero-header .text-slate-200,
+html.light header#hero-header .text-slate-300,
+html.light footer .text-white,
+html.light footer .text-slate-100,
+html.light footer .text-slate-200,
+html.light footer .text-slate-300 {
+  color: #FFFFFF !important;
+}
+
+html.light header#hero-header .text-slate-400,
+html.light footer .text-slate-400 {
+  color: #CBD5E1 !important;
+}
+
+/* High-contrast brand buttons & tags */
+html.light .bg-orange-500,
+html.light button.bg-orange-500 {
+  color: #0F172A !important;
+}
+
+html.light .bg-orange-500 .text-slate-950,
+html.light .bg-orange-500.text-slate-950 {
+  color: #0A0A0A !important;
+}
+
+/* Light mode form controls */
+html.light input,
+html.light select,
+html.light textarea {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #64748B;
+}
+

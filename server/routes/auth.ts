@@ -8,7 +8,6 @@ import * as usersRepository from '../db/usersRepository';
 import { 
   generateAccessToken, 
   generateRefreshToken, 
-  JWT_REFRESH_SECRET 
 } from '../middleware';
 import {
   createAndSaveRefreshToken,

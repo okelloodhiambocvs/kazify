@@ -50,13 +50,16 @@ describe('Kazify Integration Test Suite', () => {
       expect(res.body).toHaveProperty('accessToken');
       
       expect(res.headers['set-cookie']).toBeDefined();
+      
+      const cookies = Array.isArray(res.headers['set-cookie'])
+      ? res.headers['set-cookie']
+      : [];
+      
       expect(
-        res.headers['set-cookie']?.some((cookie: string) =>
-          cookie.startsWith('refreshToken=')
-      )
-    
-    ).toBe(true);
-    
+        
+        cookies.some(cookie => cookie.startsWith('refreshToken='))
+      ).toBe(true);
+
     expect(res.body.user).toHaveProperty('id');
     expect(res.body.user.role).toBe('customer');
     customerToken = res.body.accessToken;

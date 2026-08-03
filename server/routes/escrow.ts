@@ -65,6 +65,12 @@ escrowRouter.post('/mpesa/stkpush', authenticateToken, validateBody(stkPushSchem
       description: `M-Pesa Escrow Lock for job "${job.title}"`
     });
 
+    // Mark the job as held so UI and Fundi feed reflect the new status
+    job.escrow_status = 'held';
+    if (isDbMode()) {
+      await jobsRepository.update(jobId, { escrow_status: 'held' });
+    }
+
     return res.json({
       message: 'M-Pesa STK Push triggered successfully',
       checkoutRequestId: stkResult.CheckoutRequestID,

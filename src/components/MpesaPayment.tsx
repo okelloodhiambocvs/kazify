@@ -59,9 +59,9 @@ export default function MpesaPayment({ user, job, onPaymentSuccess, onClose }: M
     try {
       const formatted = getFormattedPhone(phoneNumber);
       const res = await api.post('/api/mpesa/stkpush', {
-        job_id: job.id,
-        phone_number: formatted,
-        amount: job.amount
+        jobId: job.id,
+        phoneNumber: formatted,
+        amount: Number(job.amount)
       });
 
       setCheckoutId(res.data.checkoutRequestId || `ws_CO_${Date.now()}`);

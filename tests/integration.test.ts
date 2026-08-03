@@ -48,13 +48,20 @@ describe('Kazify Integration Test Suite', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('accessToken');
-      expect(res.body).toHaveProperty('refreshToken');
-      expect(res.body.user).toHaveProperty('id');
-      expect(res.body.user.role).toBe('customer');
-
-      customerToken = res.body.accessToken;
-      customerId = res.body.user.id;
-    });
+      
+      expect(res.headers['set-cookie']).toBeDefined();
+      expect(
+        res.headers['set-cookie']?.some((cookie: string) =>
+          cookie.startsWith('refreshToken=')
+      )
+    
+    ).toBe(true);
+    
+    expect(res.body.user).toHaveProperty('id');
+    expect(res.body.user.role).toBe('customer');
+    customerToken = res.body.accessToken;
+    customerId = res.body.user.id;
+  });
 
     it('should allow public registration for customer role', async () => {
       const uniquePhone = `+254799${Math.floor(100000 + Math.random() * 900000)}`;

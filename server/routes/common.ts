@@ -98,6 +98,18 @@ commonRouter.post('/jobs', authenticateToken, async (req: AuthenticatedRequest, 
       workflow: workflow || 'quotation',
       location
     });
+
+    // Create a pending escrow funding transaction
+    walletTransactions.unshift({
+      id: `escrow_${Date.now()}`,
+      job_id: newJob.id,
+      user_id: customerId,
+      type: 'escrow_hold',
+      amount: Number(newJob.amount),
+      status: 'pending',
+      created_at: new Date().toISOString()
+    });
+
   } else {
     newJob = {
       id: `job_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -109,12 +121,28 @@ commonRouter.post('/jobs', authenticateToken, async (req: AuthenticatedRequest, 
       status: 'open',
       customer_id: customerId,
       customer_name: customerName,
-      location: location || { lat: -0.0917, lng: 34.7680, address: 'Kisumu, Kenya' },
+      location: location || {
+        lat: -0.0917,
+        lng: 34.7680,
+        address: 'Kisumu, Kenya'
+      },
       bids_count: 0,
       escrow_status: 'unpaid',
       created_at: new Date().toISOString()
     };
+
     jobs.unshift(newJob);
+
+    // Create a pending escrow funding transaction
+    walletTransactions.unshift({
+      id: `escrow_${Date.now()}`,
+      job_id: newJob.id,
+      user_id: customerId,
+      type: 'escrow_hold',
+      amount: Number(newJob.amount),
+      status: 'pending',
+      created_at: new Date().toISOString()
+    });
   }
 
   broadcastWSMessage({

@@ -605,14 +605,23 @@ commonRouter.post('/disputes/:disputeId/message', authenticateToken, (req: Authe
 // POST /api/ai/estimate
 commonRouter.post('/ai/estimate', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
   const { category } = req.body;
-  
-  const basePrice = category?.toLowerCase().includes('electrical') ? 3500 :
-                    category?.toLowerCase().includes('plumbing') ? 2500 :
-                    category?.toLowerCase().includes('carpentry') ? 4000 : 2000;
+
+  const basePrice =
+    category?.toLowerCase().includes('electrical') ? 3500 :
+    category?.toLowerCase().includes('plumbing') ? 2500 :
+    category?.toLowerCase().includes('carpentry') ? 4000 :
+    2000;
 
   return res.json({
-    estimate: `KES ${basePrice.toLocaleString()} - ${(basePrice * 1.5).toLocaleString()}`,
-    rationale: `Fair market value calculation based on trade complexity, material inputs, and labor rates.`
+    estimated_amount: basePrice,
+    duration_estimate: "1 - 3 hours",
+    standard_risk_score: 1,
+    price_breakdown: [
+      `Base labour estimate: KES ${basePrice.toLocaleString()}`,
+      `Estimated market range: KES ${basePrice.toLocaleString()} - ${(basePrice * 1.5).toLocaleString()}`
+    ],
+    fraud_flags: [],
+    rationale: "Fair market value calculation based on trade complexity, material inputs, and labour rates."
   });
 });
 

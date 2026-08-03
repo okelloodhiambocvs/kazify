@@ -102,10 +102,12 @@ commonRouter.post('/jobs', authenticateToken, async (req: AuthenticatedRequest, 
     // Create a pending escrow funding transaction
     walletTransactions.unshift({
       id: `escrow_${Date.now()}`,
-      job_id: newJob.id,
+      wallet_id: `wallet_${customerId}`,
       user_id: customerId,
+      job_id: newJob.id,
       type: 'escrow_hold',
-      amount: Number(newJob.amount),
+      amount: Number(amount),
+      description: `Escrow reserved for job ${newJob.title}`,
       status: 'pending',
       created_at: new Date().toISOString()
     });
@@ -136,10 +138,12 @@ commonRouter.post('/jobs', authenticateToken, async (req: AuthenticatedRequest, 
     // Create a pending escrow funding transaction
     walletTransactions.unshift({
       id: `escrow_${Date.now()}`,
-      job_id: newJob.id,
+      wallet_id: `wallet_${customerId}`,
       user_id: customerId,
+      job_id: newJob.id,
       type: 'escrow_hold',
-      amount: Number(newJob.amount),
+      amount: Number(amount),
+      description: `Escrow reserved for job ${newJob.title}`,
       status: 'pending',
       created_at: new Date().toISOString()
     });

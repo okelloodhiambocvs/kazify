@@ -150,6 +150,8 @@ export interface LocalWalletTransaction {
   description: string;
   reference_id?: string;
   created_at: string;
+  job_id?: string;
+  status?: 'pending' | 'completed' | 'failed';
 }
 
 export type LocalEscrowAccount = EscrowAccount;

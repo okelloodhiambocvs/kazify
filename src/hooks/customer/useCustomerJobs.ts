@@ -29,8 +29,17 @@ export function useCustomerJobs(
       const preloadKey = 'customer-escrow-history';
       const promise = preloadService.get(preloadKey) || api.get('/api/escrow/history');
       preloadService.clear(preloadKey);
+      
       const res = await promise;
-      setEscrowTransactions(res.data);
+      const transactions = Array.isArray(res?.data)
+      ? res.data
+      : Array.isArray(res?.data?.transactions)
+      ? res.data.transactions
+      : Array.isArray(res?.data?.history)
+      ? res.data.history
+      : [];
+      setEscrowTransactions(transactions);
+
     } catch (e) {
       console.error('Failed to load escrow transaction ledger', e);
     }

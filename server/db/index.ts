@@ -26,10 +26,17 @@ export function getDbInfo() {
 
 export async function initDb(): Promise<boolean> {
   const useInMemory = process.env.USE_IN_MEMORY === 'true';
-  const databaseUrl = process.env.DATABASE_URL;
-  const dbHost = process.env.DB_HOST;
 
-  if (useInMemory || (!databaseUrl && !dbHost)) {
+  const {
+    DATABASE_URL,
+    DB_HOST,
+    DB_PORT,
+    DB_NAME,
+    DB_USER,
+    DB_PASSWORD,
+  } = process.env;
+
+  if (useInMemory || (!DATABASE_URL && !DB_HOST)) {
     dbMode = false;
     dbFallback = false;
     dbFallbackReason = null;
@@ -45,11 +52,29 @@ export async function initDb(): Promise<boolean> {
     return false;
   }
 
+  // Validate individual PostgreSQL settings only when DATABASE_URL is not used.
+  if (!DATABASE_URL) {
+    const missing = [
+      ['DB_PORT', DB_PORT],
+      ['DB_NAME', DB_NAME],
+      ['DB_USER', DB_USER],
+      ['DB_PASSWORD', DB_PASSWORD],
+    ].filter(([, value]) => !value);
+
+    if (missing.length > 0) {
+      throw new Error(
+        `PostgreSQL configuration incomplete. Missing: ${missing
+          .map(([name]) => name)
+          .join(', ')}`
+      );
+    }
+  }
+
   try {
     pool = new Pool(
-      databaseUrl
+      DATABASE_URL
         ? {
-            connectionString: databaseUrl,
+            connectionString: DATABASE_URL,
             ssl:
               process.env.NODE_ENV === 'production'
                 ? { rejectUnauthorized: false }
@@ -59,11 +84,11 @@ export async function initDb(): Promise<boolean> {
             connectionTimeoutMillis: 3000,
           }
         : {
-            host: dbHost,
-            port: parseInt(process.env.DB_PORT || '5432', 10),
-            database: process.env.DB_NAME || 'kazify',
-            user: process.env.DB_USER || 'kazify_user',
-            password: process.env.DB_PASSWORD || '',
+            host: DB_HOST,
+            port: Number(DB_PORT),
+            database: DB_NAME,
+            user: DB_USER,
+            password: DB_PASSWORD,
             max: 20,
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 3000,

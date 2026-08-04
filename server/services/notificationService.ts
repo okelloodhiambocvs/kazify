@@ -1,5 +1,6 @@
 import { Queue, Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
+import { getRedisClient } from './redis';
 import nodemailer from 'nodemailer';
 import webpush from 'web-push';
 
@@ -97,36 +98,46 @@ class NotificationServiceEngine {
   }
 
   private initializeQueueEngine() {
-    const redisHost = process.env.REDIS_HOST;
-    const useRedis = process.env.USE_REDIS === 'true' || (!!redisHost && process.env.USE_REDIS !== 'false');
+    const connection = getRedisClient();
+    if (!connection) {
+      console.log(
+        "[NOTIFICATIONS] Shared Redis unavailable. Queue running in simulation mode."
+      );
+      return;
+    }
+    
+    try {
 
-    if (useRedis && redisHost) {
-      try {
-        const redisPort = parseInt(process.env.REDIS_PORT || '6379');
-        const redisPassword = process.env.REDIS_PASSWORD || undefined;
-
-        const connectionOptions = {
-          host: redisHost,
-          port: redisPort,
-          password: redisPassword,
-          maxRetriesPerRequest: null,
-          connectTimeout: 2000
-        };
-
-        this.queue = new Queue('kazify_notification_queue', { connection: connectionOptions });
+        this.queue = new Queue(
+          'kazify_notification_queue',
+          {
+            connection: connection as unknown as import('bullmq').ConnectionOptions
+          }
+        );
         
         this.worker = new Worker(
           'kazify_notification_queue',
           async (job: Job<NotificationJobPayload>) => {
-            console.log(`[BULLMQ WORKER] Processing notification job ${job.id} for user ${job.data.userId}`);
+            console.log(
+              `[BULLMQ WORKER] Processing notification job ${job.id} for user ${job.data.userId}`
+            );
+            
             await this.processNotificationDispatch(job.data);
           },
-          { connection: connectionOptions }
+          {
+            connection: connection as unknown as import('bullmq').ConnectionOptions
+          }
         );
-
+        
         this.worker.on('completed', (job) => {
-          console.log(`[BULLMQ SUCCESS] Job ${job.id} completed successfully.`);
-          this.updateMockQueueJobStatus(job.id || '', 'completed', 100);
+          console.log(
+            `[BULLMQ SUCCESS] Job ${job.id} completed successfully.`
+          );
+          this.updateMockQueueJobStatus(
+            job.id || '',
+            'completed',
+            100
+          );
         });
 
         this.worker.on('failed', (job, err) => {
@@ -142,10 +153,6 @@ class NotificationServiceEngine {
         console.warn('[NOTIFICATIONS] Redis connection for BullMQ failed. Falling back to inline async queue:', err.message);
         this.isBullMqActive = false;
       }
-    } else {
-      console.log('[NOTIFICATIONS] Redis not enabled. Notifications dispatched via resilient fallback in-memory executor.');
-      this.isBullMqActive = false;
-    }
   }
 
   public async dispatchNotification(payload: Omit<NotificationJobPayload, 'id' | 'created_at'>): Promise<string> {

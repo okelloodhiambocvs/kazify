@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
 import Redis from 'ioredis';
+import { getRedisClient } from './redis';
 import crypto from 'crypto';
 
 export type SecurityEventType = 
@@ -167,31 +168,33 @@ const getClientIp = (req: Request): string => {
 };
 
 const createRedisStore = (prefix: string) => {
-  const redisUrl = process.env.REDIS_URL;
-  const redisHost = process.env.REDIS_HOST;
-  if (redisUrl || redisHost) {
-    try {
-      const client = new Redis((redisUrl || {
-        host: redisHost || '127.0.0.1',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        maxRetriesPerRequest: 1
-      }) as any);
+  try {
+    const client = getRedisClient();
 
-      logger.info(`[RateLimit] Initialized Redis store with prefix '${prefix}' for multi-instance cluster deployment.`);
-
-      return new RedisStore({
-        // @ts-expect-error - ioredis sendCommand call compatible
-        sendCommand: (...args: string[]) => client.call(...args),
-        prefix: `rl:${prefix}:`
-      });
-    } catch (err: any) {
-      logger.warn('[RateLimit] Failed to initialize Redis store, falling back to local memory store:', { error: err.message });
+    if (!client) {
+      logger.info(
+        `[RateLimit] Shared Redis client unavailable. Using in-memory rate limiter for '${prefix}'.`
+      );
       return undefined;
     }
+
+    logger.info(
+      `[RateLimit] Using shared Redis client for '${prefix}' rate limiter.`
+    );
+
+    return new RedisStore({
+      // @ts-expect-error - ioredis sendCommand is compatible
+      sendCommand: (...args: string[]) => client.call(...args),
+      prefix: `rl:${prefix}:`
+    });
+  } catch (err: any) {
+    logger.warn(
+      '[RateLimit] Failed to initialize Redis rate limiter. Falling back to in-memory store.',
+      { error: err.message }
+    );
+
+    return undefined;
   }
-  return undefined;
 };
 
 export const apiRateLimiter = rateLimit({

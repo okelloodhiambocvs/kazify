@@ -79,67 +79,54 @@ app.use(
 );
 
 // Health Check Endpoint
-app.get('/api/health', async (req, res) => {
+app.get('/health', async (req, res) => {
   const dbInfo = getDbInfo();
-
-  let databaseStatus = 'memory';
-
-  if (dbInfo.dbMode) {
-    try {
-      const pool = getPool();
-
-      if (pool) {
-        await pool.query('SELECT 1');
-        databaseStatus = 'healthy';
-      } else {
-        databaseStatus = 'unavailable';
-      }
-    } catch {
-      databaseStatus = 'unhealthy';
-    }
-  }
 
   const redisHealthy = await checkRedisHealth();
 
-  const payload = {
-    status:
-      databaseStatus === 'unhealthy'
-        ? 'degraded'
-        : 'ok',
+  const databaseStatus = dbInfo.dbMode
+    ? 'connected'
+    : 'disconnected';
 
-    timestamp: new Date().toISOString(),
-
-    uptimeSeconds: Math.floor(process.uptime()),
-
-    database: {
-      mode: dbInfo.dbMode ? 'postgres' : 'memory',
-      status: databaseStatus,
-    },
-
-    redis: {
-      enabled: redisHealthy,
-      status: redisHealthy ? 'healthy' : 'unavailable',
-    },
-
-    memory: {
-      rss: process.memoryUsage().rss,
-      heapUsed: process.memoryUsage().heapUsed,
-      heapTotal: process.memoryUsage().heapTotal,
-    },
-
-    wsAuth: 'jwt',
-
-    nodeEnv: process.env.NODE_ENV || 'development',
+  const services = {
+    database: databaseStatus,
+    redis: redisHealthy ? 'connected' : 'disconnected'
   };
 
-  if (dbInfo.dbFallback) {
-    Object.assign(payload, {
-      dbFallback: true,
-      dbFallbackReason: dbInfo.dbFallbackReason,
-    });
-  }
+  const isHealthy =
+    databaseStatus === 'connected';
 
-  res.json(payload);
+  res.status(isHealthy ? 200 : 503).json({
+    status: isHealthy ? 'healthy' : 'unhealthy',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    environment: process.env.NODE_ENV || 'development',
+    services,
+    details: dbInfo.dbFallback
+      ? {
+          fallback: true,
+          reason: dbInfo.dbFallbackReason
+        }
+      : undefined
+  });
+});
+
+// Backwards compatible API health endpoint
+app.get('/api/health', async (req, res) => {
+  const dbInfo = getDbInfo();
+
+  const redisHealthy = await checkRedisHealth();
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    authStore: dbInfo.dbMode ? 'postgres' : 'memory',
+    dataStore: dbInfo.dbMode ? 'postgres' : 'memory',
+    redis: redisHealthy ? 'connected' : 'disconnected',
+    wsAuth: 'jwt',
+    nodeEnv: process.env.NODE_ENV || 'development'
+  });
 });
 
 server.on('upgrade', (req) => {

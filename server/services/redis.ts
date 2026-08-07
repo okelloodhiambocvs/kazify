@@ -12,6 +12,14 @@ export function getRedisClient(): Redis | null {
   const redisHost = process.env.REDIS_HOST;
 
   if (!redisUrl && !redisHost) {
+    const requireRedis = process.env.REQUIRE_REDIS === 'true';
+
+    if (requireRedis && process.env.NODE_ENV === 'production') {
+      throw new Error(
+        '[REDIS] Redis is required in production but no Redis configuration was provided.'
+      );
+    }
+
     logger.info('[REDIS] Redis not configured.');
     return null;
   }
@@ -80,6 +88,7 @@ export function getRedisClient(): Redis | null {
     });
 
     redisClient = null;
+
     return null;
   }
 }

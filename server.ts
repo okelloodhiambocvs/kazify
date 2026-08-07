@@ -6,6 +6,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import cookieParser from 'cookie-parser';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './server/swagger';
 import {
   helmetMiddleware,
   forceHttpsAndHsts,
@@ -67,6 +69,13 @@ app.use('/api', adminRouter);
 app.use('/api', escrowRouter);
 app.use('/api', chatRouter);
 app.use('/api', commonRouter);
+
+// Swagger API Documentation
+app.use(
+  '/api/docs',
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec)
+);
 
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {

@@ -105,13 +105,24 @@ export const users: LocalUser[] = [
 ];
 
 // Hash existing seed user passwords securely on startup and mark them as verified
+const bcryptRounds = Number(process.env.BCRYPT_ROUNDS || 12);
+
 users.forEach(user => {
   const plainPassword = user.password || user.password_hash;
-  if (plainPassword && !plainPassword.startsWith('$2a$') && !plainPassword.startsWith('$2b$')) {
-    user.password_hash = bcrypt.hashSync(plainPassword, 10);
+
+  if (
+    plainPassword &&
+    !plainPassword.startsWith('$2a$') &&
+    !plainPassword.startsWith('$2b$')
+  ) {
+    user.password_hash = bcrypt.hashSync(
+      plainPassword,
+      bcryptRounds
+    );
   } else if (plainPassword) {
     user.password_hash = plainPassword;
   }
+
   delete user.password;
   user.is_email_verified = true;
 });

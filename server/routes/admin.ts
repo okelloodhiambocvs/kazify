@@ -214,7 +214,11 @@ adminRouter.post('/admin/invite-admin', authenticateToken, requireAdmin, async (
       return res.status(400).json({ error: 'A user account with this email already exists' });
     }
 
-    const password_hash = await bcrypt.hash(password, 10);
+    const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
+    const password_hash = await bcrypt.hash(
+      password,
+      rounds
+    );
     let newAdmin: LocalUser;
 
     if (isDbMode()) {

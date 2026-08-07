@@ -314,7 +314,11 @@ export async function upsertSeedUsers(): Promise<void> {
   ];
 
   for (const s of seeds) {
-    const hash = await bcrypt.hash(s.password, 10);
+    const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
+    const hash = await bcrypt.hash(
+      s.password,
+      rounds
+    );
     await query(
       `INSERT INTO users (id, phone, email, password_hash, name, role, is_verified)
        VALUES ($1, $2, $3, $4, $5, $6, TRUE)

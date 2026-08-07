@@ -16,6 +16,7 @@ import {
   sanitizePayloadMiddleware
 } from './server/services/securityHardening';
 
+import { runDatabaseMigrations } from './server/db/runMigrations';
 import { setupWebSocket } from './server/middleware';
 import { initDb, isDbMode, getDbInfo } from './server/db';
 import { upsertSeedUsers } from './server/db/usersRepository';
@@ -34,6 +35,7 @@ validateEnvironment();
 
 const app = express();
 app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 const PORT = 3000;
 
@@ -70,6 +72,7 @@ app.use('/api', commonRouter);
 app.get('/api/health', (req, res) => {
   const dbInfo = getDbInfo();
   const store = dbInfo.dbMode ? 'postgres' : 'memory';
+
   const payload: Record<string, any> = {
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -78,48 +81,68 @@ app.get('/api/health', (req, res) => {
     wsAuth: 'jwt',
     nodeEnv: process.env.NODE_ENV || 'development'
   };
+
   if (dbInfo.dbFallback) {
     payload.dbFallback = true;
+
     if (dbInfo.dbFallbackReason) {
       payload.dbFallbackReason = dbInfo.dbFallbackReason;
     }
   }
+
   res.json(payload);
 });
 
-server.on("upgrade", (req, socket) => {
-    console.log("========== HTTP UPGRADE ==========");
-    console.log(req.url);
-    console.log(req.headers);
-    console.log("==================================");
+server.on('upgrade', (req) => {
+  console.log('========== HTTP UPGRADE ==========');
+  console.log(req.url);
+  console.log(req.headers);
+  console.log('==================================');
 });
 
 // Setup WebSockets
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({
+  server,
+  path: '/ws'
+});
+
 setupWebSocket(wss);
 
 // Vite middleware setup for Development & Static server for Production
 async function startServer() {
   const isConnected = await initDb();
+
   if (isConnected && isDbMode()) {
     try {
+      // Apply any pending versioned database migrations before
+      // creating application tables or seeding data.
+      await runDatabaseMigrations();
+
       await initRefreshTokenStore();
       await upsertSeedUsers();
       await upsertSeedWallets();
     } catch (err: any) {
-      console.warn('[DB] Failed to upsert seed data or initialize tables:', err.message);
+      console.warn(
+        '[DB] Failed to run migrations, initialize tables, or seed data:',
+        err.message
+      );
     }
   }
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+      server: {
+        middlewareMode: true
+      },
+      appType: 'spa'
     });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+
     app.use(express.static(distPath));
+
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
@@ -128,6 +151,7 @@ async function startServer() {
   server.listen(PORT, '0.0.0.0', () => {
     const dbInfo = getDbInfo();
     const store = dbInfo.dbMode ? 'postgres' : 'memory';
+
     const jwtSecretStatus = `validated (${process.env.JWT_SECRET?.length || 0} bytes strong entropy)`;
 
     console.log(`
@@ -138,7 +162,7 @@ async function startServer() {
  - CSRF: enabled (login/register exempt in dev)
  - JWT: ${jwtSecretStatus}
 ==================================================
-    `);
+`);
   });
 }
 

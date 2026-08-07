@@ -21,16 +21,43 @@ export function getRedisClient(): Redis | null {
       redisClient = new Redis(redisUrl, {
         lazyConnect: true,
         enableOfflineQueue: false,
-        maxRetriesPerRequest: null
+        maxRetriesPerRequest: null,
+        connectTimeout: 5000,
+        keepAlive: 30000,
+
+        retryStrategy(times) {
+          if (times > 5) {
+            return null;
+          }
+
+          return Math.min(times * 500, 3000);
+        }
       });
     } else {
       const options: RedisOptions = {
         host: redisHost!,
         port: parseInt(process.env.REDIS_PORT || '6379', 10),
         password: process.env.REDIS_PASSWORD || undefined,
+
         lazyConnect: true,
         enableOfflineQueue: false,
-        maxRetriesPerRequest: null
+        maxRetriesPerRequest: null,
+
+        connectTimeout: 5000,
+        keepAlive: 30000,
+
+        retryStrategy(times) {
+          if (times > 5) {
+            return null;
+          }
+
+          return Math.min(times * 500, 3000);
+        },
+
+        tls:
+          process.env.REDIS_TLS === 'true'
+            ? {}
+            : undefined
       };
 
       redisClient = new Redis(options);

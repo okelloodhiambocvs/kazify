@@ -299,97 +299,177 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 };
 
 // ============================================================================
-// 6. REDIS CACHING SYSTEM (With Graceful In-Memory Fallback)
+// 6. REDIS CACHING SYSTEM (Shared Redis Client With Graceful In-Memory Fallback)
 // ============================================================================
+
 class CacheManager {
   private redis: Redis | null = null;
   private memoryCache = new Map<string, { value: any; expiresAt: number }>();
   private isRedisConnected = false;
 
   constructor() {
-    const redisHost = process.env.REDIS_HOST;
-    const useRedis = process.env.USE_REDIS === 'true' || (!!redisHost && process.env.USE_REDIS !== 'false');
+    try {
+      this.redis = getRedisClient();
 
-    if (useRedis && redisHost) {
-      try {
-        const redisPort = parseInt(process.env.REDIS_PORT || '6379');
-        const redisPassword = process.env.REDIS_PASSWORD || undefined;
-
-        this.redis = new Redis({
-          host: redisHost,
-          port: redisPort,
-          password: redisPassword,
-          connectTimeout: 1500,
-          maxRetriesPerRequest: 1
-        });
-
-        this.redis.on('connect', () => {
-          this.isRedisConnected = true;
-          logger.info('[CACHE MANAGER] Redis Cache connected successfully.');
-        });
-
-        this.redis.on('error', (err) => {
-          this.isRedisConnected = false;
-          logger.warn('[CACHE MANAGER] Redis encountered connection issue. Switching to fallback in-memory cache:', { error: err.message });
-        });
-      } catch (err) {
-        logger.warn('[CACHE MANAGER] Redis initialization failed. Using in-memory fallback cache.');
+      if (!this.redis) {
+        logger.info(
+          '[CACHE MANAGER] Shared Redis unavailable. Using in-memory cache fallback.'
+        );
+        return;
       }
-    } else {
-      logger.info('[CACHE MANAGER] Redis disabled or unconfigured. Operating exclusively in high-availability in-memory cache.');
+
+      this.redis.on('connect', () => {
+        this.isRedisConnected = true;
+
+        logger.info(
+          '[CACHE MANAGER] Shared Redis cache connection established.'
+        );
+      });
+
+      this.redis.on('ready', () => {
+        this.isRedisConnected = true;
+
+        logger.info(
+          '[CACHE MANAGER] Redis cache ready.'
+        );
+      });
+
+      this.redis.on('error', (err) => {
+        this.isRedisConnected = false;
+
+        logger.warn(
+          '[CACHE MANAGER] Redis cache error. Switching to memory fallback.',
+          {
+            error: err.message
+          }
+        );
+      });
+
+    } catch (err: any) {
+      logger.warn(
+        '[CACHE MANAGER] Redis cache initialization failed. Using memory fallback.',
+        {
+          error: err.message
+        }
+      );
+
+      this.redis = null;
     }
   }
 
+
   async get<T>(key: string): Promise<T | null> {
+
     if (this.isRedisConnected && this.redis) {
       try {
         const cached = await this.redis.get(key);
+
         if (cached) {
           return JSON.parse(cached) as T;
         }
-      } catch (err) {
-        logger.warn('[CACHE MANAGER] Failed to fetch cache key from Redis. Reading from memory cache fallback.', { key });
+
+      } catch (err: any) {
+
+        logger.warn(
+          '[CACHE MANAGER] Redis read failed. Checking memory cache.',
+          {
+            key,
+            error: err.message
+          }
+        );
+
       }
     }
 
+
     const local = this.memoryCache.get(key);
+
     if (local) {
+
       if (Date.now() < local.expiresAt) {
         return local.value as T;
       }
+
       this.memoryCache.delete(key);
     }
+
+
     return null;
   }
 
-  async set(key: string, value: any, ttlSeconds: number = 300): Promise<void> {
+
+  async set(
+    key: string,
+    value: any,
+    ttlSeconds: number = 300
+  ): Promise<void> {
+
+
     if (this.isRedisConnected && this.redis) {
+
       try {
-        await this.redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+
+        await this.redis.set(
+          key,
+          JSON.stringify(value),
+          'EX',
+          ttlSeconds
+        );
+
         return;
-      } catch (err) {
-        logger.warn('[CACHE MANAGER] Failed to save cache key to Redis. Saving in memory fallback.', { key });
+
+      } catch (err: any) {
+
+        logger.warn(
+          '[CACHE MANAGER] Redis write failed. Using memory fallback.',
+          {
+            key,
+            error: err.message
+          }
+        );
+
       }
     }
+
 
     this.memoryCache.set(key, {
       value,
-      expiresAt: Date.now() + (ttlSeconds * 1000)
+      expiresAt: Date.now() + ttlSeconds * 1000
     });
+
   }
 
+
   async delete(key: string): Promise<void> {
+
+
     if (this.isRedisConnected && this.redis) {
+
       try {
+
         await this.redis.del(key);
+
         return;
-      } catch (err) {
-        logger.warn('[CACHE MANAGER] Failed to delete cache key from Redis.', { key });
+
+      } catch (err: any) {
+
+        logger.warn(
+          '[CACHE MANAGER] Redis delete failed. Removing from memory.',
+          {
+            key,
+            error: err.message
+          }
+        );
+
       }
     }
+
+
     this.memoryCache.delete(key);
+
   }
 }
+
 
 export const cache = new CacheManager();
 

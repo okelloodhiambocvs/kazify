@@ -127,7 +127,8 @@ authRouter.post('/register', validateBody(registerSchema), async (req: Request, 
       return res.status(400).json({ error: 'User with this email or phone already exists' });
     }
 
-    const password_hash = await bcrypt.hash(password, 12);
+    const rounds = Number(process.env.BCRYPT_ROUNDS || 12);
+    const password_hash = await bcrypt.hash(password, rounds);
     let newUser: LocalUser;
 
     if (isDbMode()) {

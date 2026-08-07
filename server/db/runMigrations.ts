@@ -2,10 +2,6 @@ import { execSync } from 'node:child_process';
 import { logger } from '../services/securityHardening';
 
 export async function runDatabaseMigrations(): Promise<void> {
-  if (!process.env.DATABASE_URL) {
-    return;
-  }
-
   try {
     logger.info('[DB] Running database migrations...');
 
@@ -20,7 +16,7 @@ export async function runDatabaseMigrations(): Promise<void> {
       }
     );
 
-    logger.info('[DB] Database migrations completed.');
+    logger.info('[DB] Database migrations completed successfully.');
   } catch (err: any) {
     logger.error('[DB] Database migration failed.', {
       error: err.message

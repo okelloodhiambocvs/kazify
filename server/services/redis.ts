@@ -83,3 +83,27 @@ export function getRedisClient(): Redis | null {
     return null;
   }
 }
+
+export async function checkRedisHealth(): Promise<boolean> {
+  const client = getRedisClient();
+
+  if (!client) {
+    return false;
+  }
+
+  try {
+    if (client.status !== 'ready') {
+      await client.connect();
+    }
+
+    const response = await client.ping();
+
+    return response === 'PONG';
+  } catch (err: any) {
+    logger.warn('[REDIS] Health check failed.', {
+      error: err.message
+    });
+
+    return false;
+  }
+}

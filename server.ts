@@ -20,7 +20,7 @@ import {
 
 import { runDatabaseMigrations } from './server/db/runMigrations';
 import { setupWebSocket } from './server/middleware';
-import { initDb, isDbMode, getDbInfo } from './server/db';
+import { initDb, isDbMode, getDbInfo, getPool } from './server/db';
 import { upsertSeedUsers } from './server/db/usersRepository';
 import { upsertSeedWallets } from './server/db/walletsRepository';
 import { initRefreshTokenStore } from './server/services/refreshTokenService';
@@ -31,6 +31,7 @@ import { adminRouter } from './server/routes/admin';
 import { escrowRouter } from './server/routes/escrow';
 import { chatRouter } from './server/routes/chat';
 import { commonRouter } from './server/routes/common';
+import { checkRedisHealth } from './server/services/redis';
 
 dotenv.config();
 validateEnvironment();
@@ -78,25 +79,64 @@ app.use(
 );
 
 // Health Check Endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const dbInfo = getDbInfo();
-  const store = dbInfo.dbMode ? 'postgres' : 'memory';
 
-  const payload: Record<string, any> = {
-    status: 'ok',
+  let databaseStatus = 'memory';
+
+  if (dbInfo.dbMode) {
+    try {
+      const pool = getPool();
+
+      if (pool) {
+        await pool.query('SELECT 1');
+        databaseStatus = 'healthy';
+      } else {
+        databaseStatus = 'unavailable';
+      }
+    } catch {
+      databaseStatus = 'unhealthy';
+    }
+  }
+
+  const redisHealthy = await checkRedisHealth();
+
+  const payload = {
+    status:
+      databaseStatus === 'unhealthy'
+        ? 'degraded'
+        : 'ok',
+
     timestamp: new Date().toISOString(),
-    authStore: store,
-    dataStore: store,
+
+    uptimeSeconds: Math.floor(process.uptime()),
+
+    database: {
+      mode: dbInfo.dbMode ? 'postgres' : 'memory',
+      status: databaseStatus,
+    },
+
+    redis: {
+      enabled: redisHealthy,
+      status: redisHealthy ? 'healthy' : 'unavailable',
+    },
+
+    memory: {
+      rss: process.memoryUsage().rss,
+      heapUsed: process.memoryUsage().heapUsed,
+      heapTotal: process.memoryUsage().heapTotal,
+    },
+
     wsAuth: 'jwt',
-    nodeEnv: process.env.NODE_ENV || 'development'
+
+    nodeEnv: process.env.NODE_ENV || 'development',
   };
 
   if (dbInfo.dbFallback) {
-    payload.dbFallback = true;
-
-    if (dbInfo.dbFallbackReason) {
-      payload.dbFallbackReason = dbInfo.dbFallbackReason;
-    }
+    Object.assign(payload, {
+      dbFallback: true,
+      dbFallbackReason: dbInfo.dbFallbackReason,
+    });
   }
 
   res.json(payload);

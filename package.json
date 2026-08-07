@@ -10,8 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "migrate": "node-pg-migrate -d $DATABASE_URL -m db/migrations up",
-    "migrate:down": "node-pg-migrate -d $DATABASE_URL -m db/migrations down",
+    "migrate": "node-pg-migrate",
+    "migrate:down": "node-pg-migrate down",
     "migrate:create": "node-pg-migrate create -m db/migrations"
   },
   "dependencies": {
@@ -62,6 +62,7 @@
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^10.1.0",
     "esbuild": "^0.25.0",
     "node-pg-migrate": "^9.0.0",
     "supertest": "^7.2.2",

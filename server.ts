@@ -40,7 +40,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 const server = http.createServer(app);
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Apply TLS/HTTPS & HSTS Enforcement
 app.use(forceHttpsAndHsts);
